@@ -20,7 +20,7 @@ struct Exposure {
 	std::string filename;
 	float exposure;
 	float shown_exposure;
-	float *image;
+	uint16_t *image;
 
 	inline Exposure(const std::string &filename)
 	 : filename(filename), exposure(-1), image(NULL) { }
@@ -45,7 +45,15 @@ struct ExposureSeries {
 	std::vector<Exposure> exposures;
 	StringMap metadata;
 	size_t width, height;
-	float saturation;
+	uint16_t blacklevel, saturation, whitepoint;
+	float *image;
+
+	inline ExposureSeries() : image(NULL) { }
+
+	~ExposureSeries() {
+		if (image)
+			delete image;
+	}
 
 	/**
 	 * Add a file to the exposure series (or, optionally, a sequence
@@ -72,16 +80,16 @@ struct ExposureSeries {
 	void load();
 
 	/// Evaluate a given pixel of an exposure series
-	inline float eval(size_t img, size_t x, size_t y) const {
+	inline uint16_t &eval(size_t img, size_t x, size_t y) const {
 		return exposures[img].image[x+width*y];
 	}
 
 	/// Evaluate a given pixel of an exposure series (Bayer grid)
-	inline float eval(size_t img, size_t x, size_t y, int ch) const {
+/*	inline float &eval(size_t img, size_t x, size_t y, int ch) const {
 		x = x*2 + ch&1;
 		y = y*2 + (ch&2) >> 1;
 		return exposures[img].image[x+width*y];
-	}
+	}*/
 
 	/// Return the number of exposures
 	inline size_t size() const {

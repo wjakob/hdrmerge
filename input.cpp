@@ -59,6 +59,15 @@ void ExposureSeries::add(const char *fmt) {
 	}
 }
 
+float exposureTime(float shutterSpeedValue) {
+	/* lifted from libexiv2 */
+	double tmp = std::exp(std::log(2.0) * shutterSpeedValue);
+	if (tmp > 1)
+		return 1.0f / ((int) (tmp + 0.5));
+	else
+		return (int) (1/tmp + 0.5);
+}
+
 void ExposureSeries::check() {
 	float isoSpeed = -1, aperture = -1;
 
@@ -91,7 +100,9 @@ void ExposureSeries::check() {
 		it = exifData.findKey(Exiv2::ExifKey("Exif.Photo.ShutterSpeedValue"));
 		if (it == exifData.end())
 			throw std::runtime_error("\"" + exp.filename + "\": could not extract the exposure time!");
+
 		exp.exposure = std::pow(2, -it->toFloat());
+		exp.exposure = exposureTime(it->toFloat());
 
 		it = Exiv2::exposureTime(exifData);
 		if (it == exifData.end())
@@ -160,8 +171,8 @@ void ExposureSeries::check() {
 			return a.exposure == b.exposure;
 	});
 
-	if (it != exposures.end())
-		throw std::runtime_error((boost::format("Duplicate exposure time: %1%") % it->toString()).str());
+//	if (it != exposures.end())
+//		throw std::runtime_error((boost::format("Duplicate exposure time: %1%") % it->toString()).str());
 
 	cout << "Collected " << metadata.size() << " metadata entries." << endl;
 }
@@ -207,21 +218,15 @@ void ExposureSeries::load() {
 		if (i == 0) {
 			this->width = width;
 			this->height = height;
+			this->blacklevel = raw->blackLevel;
+			this->whitepoint = raw->whitePoint;
 		}
 
 		uint16_t *data = (uint16_t *) raw->getData(0, 0);
+		uint16_t *image = new uint16_t[width*height];
 
-		uint16_t offset = raw->blackLevel;
-		float factor = 1.0f / (raw->whitePoint - offset);
-	
-		float *image = new float[width*height];
-		for (int y=0; y<height; ++y) {
-			uint16_t *src = data + y*pitch;
-			float *dst = image + y*width;
-
-			for (int x=0; x<width; ++x)
-				*dst++ = (*src++ - offset) * factor;
-		}
+		for (int y=0; y<height; ++y)
+			memcpy(image+y*width, data+y*pitch, sizeof(uint16_t)*width);
 
 		exposures[i].image = image;
 
@@ -233,17 +238,18 @@ void ExposureSeries::load() {
 	}
 
 	cout << " done (" << width << "x" << height << ", using "
-		 << (width*height*sizeof(float) * exposures.size()) / (float) (1024*1024)
+		 << (width*height*sizeof(uint16_t) * exposures.size()) / (float) (1024*1024)
 		 << " MiB of memory)" << endl;
 
 	/* Determine the value of a pixel considered to be overexposured */
 	size_t npix = width*height;
-	float *temp = new float[npix];
-	memcpy(temp, exposures[size()-1].image, npix*sizeof(float));
+	uint16_t *temp = new uint16_t[npix];
+	memcpy(temp, exposures[size()-1].image, npix*sizeof(uint16_t));
 	size_t percentile = (size_t) (npix*0.999);
 	std::nth_element(temp, temp+percentile, temp+npix);
 	saturation = *(temp+percentile);
 	delete[] temp;
 
-	cout << "Saturation detected to be around " << saturation << "." << endl;
+	cout << "Saturation determined to be around "
+		<< (saturation-blacklevel) / (float) (whitepoint-blacklevel) * 100 << "\% of the dynamic range." << endl;
 }

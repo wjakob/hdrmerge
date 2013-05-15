@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 2.6)
 project(hdrmerge)
 
+set(CMAKE_BUILD_TYPE Release)
 set(CMAKE_C_COMPILER /usr/local/bin/gcc)
 set(CMAKE_C_COMPILER /usr/local/bin/gcc)
 
@@ -21,7 +22,7 @@ include_directories(${OPENEXR_INCLUDE_PATHS})
 include_directories(${EXIV2_INCLUDE_DIR})
 
 # Compile with C++11 features
-set (CMAKE_CXX_FLAGS "-std=c++11 ${CMAKE_CXX_FLAGS}")
+set (CMAKE_CXX_FLAGS "-std=c++11 -g -fno-omit-frame-pointer ${CMAKE_CXX_FLAGS}")
 
 add_subdirectory(rawspeed)
 add_executable(hdrmerge input.cpp util.cpp main.cpp)

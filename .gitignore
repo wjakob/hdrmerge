@@ -1,1 +1,6 @@
 CMakeFiles
+Makefile
+CMakeCache.txt
+hdrmerge
+cmake_install.cmake
+rawspeed/librawspeed.a
