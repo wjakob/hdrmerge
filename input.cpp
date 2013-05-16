@@ -102,7 +102,7 @@ void ExposureSeries::check() {
 			throw std::runtime_error("\"" + exp.filename + "\": could not extract the exposure time!");
 
 		exp.exposure = std::pow(2, -it->toFloat());
-		exp.exposure = exposureTime(it->toFloat());
+		//exp.exposure = exposureTime(it->toFloat());
 
 		it = Exiv2::exposureTime(exifData);
 		if (it == exifData.end())

@@ -37,9 +37,9 @@ void merge(ExposureSeries &es) {
 //	#pragma omp parallel for schedule(dynamic, 1)
 	for (int y=0; y<es.height; ++y) {
 		uint32_t offset = y * es.width;
+		offset = 11002202;
 		for (int x=0; x<es.width; ++x) {
 			float value = 0, total_exposure = 0;
-			offset = 11002202;
 
 			cout << "Offset=" << offset << endl;
 			for (int img=0; img<es.size(); ++img) {
@@ -70,8 +70,8 @@ void merge(ExposureSeries &es) {
 				
 				value += value_tbl[pxvalue] * weight;
 				total_exposure += es.exposures[img].exposure * weight;
-//				cout << img << ": " << value_tbl[pxvalue] << " (pred=" << reference * es.exposures[img].exposure << ")  => weight=" << weight << ", value=" << value << endl;
-				cout << pxvalue << ", " << predicted_pxvalue << "; ";
+///				cout << img << ": " << value_tbl[pxvalue] << " (pred=" << reference * es.exposures[img].exposure << ")  => weight=" << weight << ", value=" << value << endl;
+				cout << pxvalue << ", " << predicted_pxvalue << ", " << es.exposures[img].exposure << "; ";
 			}
 			cout << endl;
 
@@ -80,7 +80,6 @@ void merge(ExposureSeries &es) {
 			cout << " ====>> reference = " << value << endl;
 
 			es.image[offset++] = value;
-			exit(-1);
 		}
 	}
 }

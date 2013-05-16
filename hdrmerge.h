@@ -102,10 +102,13 @@ extern int getProcessorCount();
 
 /**
  * Write a lossless floating point OpenEXR file using either half or
- * single precision
+ * single precision (grayscale or RGB)
  */
 extern void writeOpenEXR(const std::string &filename, size_t w, size_t h,
 	int channels, float *data, const StringMap &metadata, bool writeHalf);
+
+/// Read an OpenEXR image (grayscale only atm)
+float *readOpenEXR(const std::string &filename, size_t &w, size_t &h);
 
 #define RS_SCALE (1.0f / (1.0f + RAND_MAX))
 

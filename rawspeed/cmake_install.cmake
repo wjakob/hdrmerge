@@ -1,4 +1,4 @@
-# Install script for directory: /home/wenzel/hdrmerge2/rawspeed
+# Install script for directory: /home/wenzel/hdrmerge/rawspeed
 
 # Set the install prefix
 IF(NOT DEFINED CMAKE_INSTALL_PREFIX)
