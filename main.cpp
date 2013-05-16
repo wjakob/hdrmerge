@@ -1,99 +1,108 @@
+#include <boost/program_options.hpp>
+#include <boost/lexical_cast.hpp>
+#include <boost/tokenizer.hpp>
+#include <fstream>
 #include "hdrmerge.h"
 
-float compute_weight(uint16_t value, uint16_t blacklevel, uint16_t saturation) {
-	const float alpha = -1.0f / 10.0f;
-	const float beta = 1.0f / std::exp(4.0f*alpha);
-
-	float scaled = (value - blacklevel) / (float) (saturation - blacklevel);
-
-	if (scaled <= 0 || scaled >= 1)
-		return 0;
-
-	return beta * std::exp(alpha * (1/scaled + 1/(1-scaled)));
-}
-
-float compute_weight(float scaled) {
-	const float alpha = -1.0f / 10.0f;
-	const float beta = 1.0f / std::exp(4.0f*alpha);
-
-	if (scaled <= 0 || scaled >= 1)
-		return 0;
-
-	return beta * std::exp(alpha * (1/scaled + 1/(1-scaled)));
-}
-
-void merge(ExposureSeries &es) {
-	cout << "Merging " << es.size() << " exposures .." << endl;
-	es.image = new float[es.width * es.height];
-
-	/* Precompute some tables for weights and normalized pixel values */
-	float weight_tbl[0xFFFF], value_tbl[0xFFFF];
-	for (int i=0; i<0xFFFF; ++i) {
-		weight_tbl[i] = compute_weight((uint16_t) i, es.blacklevel, es.saturation);
-		value_tbl[i] = (float) (i - es.blacklevel) / (float) (es.whitepoint - es.blacklevel);
-	}
-
-
-//	#pragma omp parallel for schedule(dynamic, 1)
-	for (int y=0; y<es.height; ++y) {
-		uint32_t offset = y * es.width;
-		offset = 11002202;
-		for (int x=0; x<es.width; ++x) {
-			float value = 0, total_exposure = 0;
-
-			cout << "Offset=" << offset << endl;
-			for (int img=0; img<es.size(); ++img) {
-				uint16_t pxvalue = es.exposures[img].image[offset];
-				float weight = weight_tbl[pxvalue];
-				value += value_tbl[pxvalue] * weight;
-				total_exposure += es.exposures[img].exposure * weight;
-
-				cout << img << ": " << pxvalue << " => weight=" << weight << ", value=" << value << endl;
-			}
-
-			if (total_exposure > 0)
-				value /= total_exposure;
-
-			cout << " ====>> reference = " << value << endl;
-			float reference = value;
-			value = total_exposure = 0;
-
-			float blacklevel = es.blacklevel, scale = es.whitepoint - es.blacklevel;
-
-			for (int img=0; img<es.size(); ++img) {
-				float predicted = reference * es.exposures[img].exposure * scale + blacklevel;
-				if (predicted <= 0 || predicted >= 65535.0f)
-					continue;
-				uint16_t predicted_pxvalue = (uint16_t) (predicted + 0.5f);
-				uint16_t pxvalue = es.exposures[img].image[offset];
-				float weight = weight_tbl[predicted_pxvalue];
-				
-				value += value_tbl[pxvalue] * weight;
-				total_exposure += es.exposures[img].exposure * weight;
-///				cout << img << ": " << value_tbl[pxvalue] << " (pred=" << reference * es.exposures[img].exposure << ")  => weight=" << weight << ", value=" << value << endl;
-				cout << pxvalue << ", " << predicted_pxvalue << ", " << es.exposures[img].exposure << "; ";
-			}
-			cout << endl;
-
-			if (total_exposure > 0)
-				value /= total_exposure;
-			cout << " ====>> reference = " << value << endl;
-
-			es.image[offset++] = value;
-		}
-	}
-}
+namespace po = boost::program_options;
 
 int main(int argc, char **argv) {
-	ExposureSeries es;
-//	es.add("test-%02i.cr2");
-	es.add("/mnt/raid0/layered2/meas2-%05i-00000.cr2");
-	es.check();
-	if (es.size() == 0)
-		throw std::runtime_error("No input found / list of exposures to merge is empty!");
-	es.load();
-	merge(es);
+	po::options_description options("Options");
+	po::options_description hidden_options("Hiden options");
+	po::variables_map vm;
 
-	writeOpenEXR("test.exr", es.width, es.height, 1, es.image, es.metadata, false);
+	options.add_options()
+		("help", "Print information on how to use this program")
+		("colormatrix", po::value<std::string>()->multitoken(), "Matrix that transforms from the sensor color space to linear sRGB")
+		("demosaic", po::value<bool>()->default_value(true, "yes"), "Perform demosaicing?");
+	hidden_options.add_options()
+		("input-files", po::value<std::vector<std::string>>(), "Input files");
+
+	po::options_description all_options;
+	all_options.add(options).add(hidden_options);
+
+	try {
+		std::ifstream settings("hdrmerge.cfg", std::ifstream::in);
+		po::store(po::parse_config_file(settings, all_options), vm);
+		settings.close();
+
+		po::positional_options_description positional;
+		positional.add("input-files", -1);
+		po::store(po::command_line_parser(argc, argv).options(all_options).positional(positional).run(), vm);
+		if (vm.count("help")) {
+			cout << "Command line parameters" << endl << options;
+		}
+
+		po::notify(vm);
+	} catch (po::error &e) {
+		cerr << "Error while parsing command line arguments: " << e.what() << endl << endl;
+		cout << options << endl;
+		return -1;
+	}
+
+	if (!vm.count("input-files")) {
+		cout << "Command line parameters" << endl << options;
+		return 0;
+	}
+
+	float colormatrix[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1 };
+	if (!vm.count("colormatrix")) {
+		cerr << "Warning: no color matrix was specified -- this is necessary to get proper sRGB" << endl
+			 << "output. To acquire this matrix, convert any one of your RAW images to a DNG file" << endl
+			 << "using Adobe's DNG converter on Windows (or on Linux, using 'wine'). Then run" << endl
+			 << endl
+			 << "  $ exiv2 -pt image.dng 2> /dev/null | grep ColorMatrix2" << endl
+			 << "  Exif.Image.ColorMatrix2 SRational 9  <sequence of ratios>" << endl
+			 << endl
+			 << "Next, turn this into a space/comma-separated sequence of floating point values " << endl
+			 << "and add a line to the file hdrmerge.cfg (creating it if necessary), like so:" << endl
+			 << endl
+			 << "  colormatrix=0.4920 0.0616 -0.0593 -0.6493 1.3964 0.2784 -0.1774 0.3178 0.7005" << endl
+			 << endl
+			 << "To get output in the camera native color space, use a linear matrix:" << endl
+			 << endl
+			 << "  colormatrix=1 0 0 0 1 0 0 0 1" << endl
+			 << endl
+			 << "(reverting to camera native color space for now..)" << endl;
+	} else {
+		std::string argument = vm["colormatrix"].as<std::string>();
+		boost::char_separator<char> sep(", ");
+		boost::tokenizer<boost::char_separator<char>> tokens(argument, sep);
+
+		try {
+			int pos = -1;
+			for (auto it = tokens.begin(); it != tokens.end(); ++it) {
+				if (++pos == 9)
+					break;
+    			colormatrix[pos] = boost::lexical_cast<float>(*it);
+			}
+			if (pos != 8) {
+				cerr << "Color matrix argument has the wrong number of entries!" << endl;
+				return -1;
+			}
+		} catch (const boost::bad_lexical_cast &) {
+			cerr << "Unable to parse color matrix argument!" << endl;
+			return -1;
+		}
+	}
+
+	try {
+		std::vector<std::string> exposures = vm["input-files"].as<std::vector<std::string>>();
+
+		ExposureSeries es;
+		for (size_t i=0; i<exposures.size(); ++i)
+			es.add(exposures[i]);
+		es.check();
+		if (es.size() == 0)
+			throw std::runtime_error("No input found / list of exposures to merge is empty!");
+		es.load();
+		es.merge();
+
+		es.demosaic(colormatrix);
+	} catch (const std::exception &ex) {
+		cerr << "Encountered a fatal error: " << ex.what() << endl;
+		return -1;
+	}
+
 	return 0;
 }

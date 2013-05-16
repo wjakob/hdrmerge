@@ -83,7 +83,6 @@ void writeOpenEXR(const std::string &filename, size_t w, size_t h, int nChannels
 float *readOpenEXR(const std::string &filename, size_t &w, size_t &h) {
 	Imf::setGlobalThreadCount(getProcessorCount());
 	Imf::InputFile file(filename.c_str());
-	const Imf::Header &header = file.header();
 
 	Imath::Box2i dataWindow = file.header().dataWindow();
 	w = dataWindow.max.x - dataWindow.min.x + 1;

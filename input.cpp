@@ -26,18 +26,18 @@ static std::mutex __metadata_mutex;
  *  - the images were taken using manual focus and manual exposure mode
  *  - there are no duplicate exposures.
  */
-void ExposureSeries::add(const char *fmt) {
+void ExposureSeries::add(const std::string &fmt) {
 	bool success = false;
 
 	for (int exposure = 0; ; ++exposure) {
 		char filename[1024];
-		snprintf(filename, sizeof(filename), fmt, exposure);
+		snprintf(filename, sizeof(filename), fmt.c_str(), exposure);
 		Exposure exp(filename);
 
 		if (access(filename, F_OK) != 0)
 			break;
 
-		if (exposure == 1 && strchr(fmt, '%') == NULL)
+		if (exposure == 1 && strchr(fmt.c_str(), '%') == NULL)
 			break; /* Just one image -- stop */
 
 		success = true;
@@ -48,7 +48,7 @@ void ExposureSeries::add(const char *fmt) {
 		/* Maybe the sequence starts at 1? */
 		for (int exposure = 1; ; ++exposure) {
 			char filename[1024];
-			snprintf(filename, sizeof(filename), fmt, exposure);
+			snprintf(filename, sizeof(filename), fmt.c_str(), exposure);
 			Exposure exp(filename);
 
 			if (access(filename, F_OK) != 0)
@@ -79,14 +79,14 @@ void ExposureSeries::check() {
 			throw std::runtime_error("\"" + exp.filename + "\": could not open RAW file!");
 		image->readMetadata();
 
-		Exiv2::ExifData &exifData = image->exifData();
+		const Exiv2::ExifData &exifData = image->exifData();
 
 		Exiv2::ExifData::const_iterator it;
 		for (it = exifData.begin(); it != exifData.end(); ++it) {
-			if (it->value().size() > 100) /* Reject huge attributes */
+			std::string value = it->toString();
+			if (value.length() > 100) /* Ignore huge attributes */
 				continue;
 			/* Collect the remainder */
-			std::string value = it->toString();
 			if (metadata.find(it->key()) != metadata.end()) {
 				std::string current = metadata[it->key()];
 				if (value == current)
@@ -132,13 +132,13 @@ void ExposureSeries::check() {
 		if (it == exifData.end())
 			throw std::runtime_error("\"" + exp.filename + "\": could not extract the exposure mode!");
 		if (it->print(&exifData) != "Manual")
-			std::cerr << "Warning: image \"" << exp.filename << "\" was *not* taken in manual exposure mode!" << endl;
+			cerr << "Warning: image \"" << exp.filename << "\" was *not* taken in manual exposure mode!" << endl;
 
 		/* If this image was taken by a Canon camera, also check the focus mode and possibly warn */
 		it = exifData.findKey(Exiv2::ExifKey("Exif.CanonCs.FocusMode"));
 		if (it != exifData.end()) {
 			if (it->print(&exifData) != "Manual focus")
-				std::cerr << "Warning: image \"" << exp.filename << "\" was *not* taken in manual focus mode!" << endl;
+				cerr << "Warning: image \"" << exp.filename << "\" was *not* taken in manual focus mode!" << endl;
 		}
 	}
 
@@ -220,6 +220,7 @@ void ExposureSeries::load() {
 			this->height = height;
 			this->blacklevel = raw->blackLevel;
 			this->whitepoint = raw->whitePoint;
+			this->filter = raw->cfa.getDcrawFilter();
 		}
 
 		uint16_t *data = (uint16_t *) raw->getData(0, 0);
@@ -241,15 +242,17 @@ void ExposureSeries::load() {
 		 << (width*height*sizeof(uint16_t) * exposures.size()) / (float) (1024*1024)
 		 << " MiB of memory)" << endl;
 
-	/* Determine the value of a pixel considered to be overexposured */
-	size_t npix = width*height;
-	uint16_t *temp = new uint16_t[npix];
-	memcpy(temp, exposures[size()-1].image, npix*sizeof(uint16_t));
-	size_t percentile = (size_t) (npix*0.999);
-	std::nth_element(temp, temp+percentile, temp+npix);
-	saturation = *(temp+percentile);
-	delete[] temp;
+	if (saturation == 0 && size() > 1) {
+		/* Determine the value of a pixel considered to be overexposured */
+		size_t npix = width*height;
+		uint16_t *temp = new uint16_t[npix];
+		memcpy(temp, exposures[size()-1].image, npix*sizeof(uint16_t));
+		size_t percentile = (size_t) (npix*0.999);
+		std::nth_element(temp, temp+percentile, temp+npix);
+		saturation = *(temp+percentile);
+		delete[] temp;
 
-	cout << "Saturation determined to be around "
-		<< (saturation-blacklevel) / (float) (whitepoint-blacklevel) * 100 << "\% of the dynamic range." << endl;
+		cout << "Saturation determined to be around "
+			<< (saturation-blacklevel) / (float) (whitepoint-blacklevel) * 100 << "\% of the dynamic range." << endl;
+	}
 }

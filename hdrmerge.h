@@ -25,9 +25,15 @@ struct Exposure {
 	inline Exposure(const std::string &filename)
 	 : filename(filename), exposure(-1), image(NULL) { }
 
-	~Exposure() {
-		if (image)
+	inline ~Exposure() {
+		release();
+	}
+
+	inline void release() {
+		if (image) {
 			delete[] image;
+			image = NULL;
+		}
 	}
 
 	/// Return the exposure has a human-readable string
@@ -44,22 +50,36 @@ struct Exposure {
 struct ExposureSeries {
 	std::vector<Exposure> exposures;
 	StringMap metadata;
-	size_t width, height;
-	uint16_t blacklevel, saturation, whitepoint;
-	float *image;
 
-	inline ExposureSeries() : image(NULL) { }
+	/* Width and height of the cropped RAW images */
+	size_t width, height;
+
+	/* Black level, saturation value and whitepoint (max theoretical range) */
+	int blacklevel, saturation, whitepoint;
+
+	/* Merged high dynamic range image (no demosaicing yet) */
+	float *merged;
+
+	/* dcraw-style color filter array description */
+	int filter;
+
+	inline ExposureSeries() : saturation(0), merged(NULL) { }
 
 	~ExposureSeries() {
-		if (image)
-			delete image;
+		if (merged)
+			delete[] merged;
+	}
+
+	/// Return the color at position (x, y)
+	inline int fc(int x, int y) {
+		return (filter >> (((y << 1 & 14) + (x & 1)) << 1) & 3);
 	}
 
 	/**
 	 * Add a file to the exposure series (or, optionally, a sequence
 	 * such as file_%03i.png expressed using the printf-style format)
 	 */
-	void add(const char *filename);
+	void add(const std::string &filename);
 
 	/**
 	 * Check that all exposures are valid, and that they satisfy
@@ -79,17 +99,11 @@ struct ExposureSeries {
 	 */
 	void load();
 
-	/// Evaluate a given pixel of an exposure series
-	inline uint16_t &eval(size_t img, size_t x, size_t y) const {
-		return exposures[img].image[x+width*y];
-	}
+	/// Merge all exposures into a single HDR image and release the RAW data
+	void merge();
 
-	/// Evaluate a given pixel of an exposure series (Bayer grid)
-/*	inline float &eval(size_t img, size_t x, size_t y, int ch) const {
-		x = x*2 + ch&1;
-		y = y*2 + (ch&2) >> 1;
-		return exposures[img].image[x+width*y];
-	}*/
+	/// Perform demosaicing
+	void demosaic(float *colormatrix);
 
 	/// Return the number of exposures
 	inline size_t size() const {
@@ -120,6 +134,12 @@ inline float randf() {
     } while (f >= 1); /* Round off */
 
     return f;
+}
+
+inline float clamp(float value, float min, float max) {
+	if (min > max)
+		std::swap(min, max);
+	return std::min(std::max(value, min), max);
 }
 
 #endif /* __HDRMERGE_H */
