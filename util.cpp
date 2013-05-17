@@ -14,7 +14,7 @@ void writeOpenEXR(const std::string &filename, size_t w, size_t h, int nChannels
 
 	Imf::ChannelList &channels = header.channels();
 
-	cout << "Writing " << filename << " .. " << endl;
+	cout << "Writing " << filename << " (" << w << "x" << h << ", " << nChannels << " channels) .. " << endl;
 	if (nChannels == 3) {
 		if (writeHalf) {
 			channels.insert("R", Imf::Channel(Imf::HALF));

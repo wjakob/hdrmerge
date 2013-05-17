@@ -15,6 +15,7 @@ using std::cerr;
 using std::endl;
 
 typedef std::map<std::string, std::string> StringMap;
+typedef float float3[3];
 
 struct Exposure {
 	std::string filename;
@@ -61,7 +62,7 @@ struct ExposureSeries {
 	float *image_merged;
 	
 	/* Merged and demosaiced image */
-	float (*image_demosaiced)[3];
+	float3 *image_demosaiced;
 
 	/* dcraw-style color filter array description */
 	int filter;
@@ -114,8 +115,11 @@ struct ExposureSeries {
 	/// Transform the image into the right color space
 	void transform_color(float *sensor2xyz, bool xyz);
 
-	/// Scale the image by a factor
+	/// Scale the image brightness by a given factor
 	void scale(float factor);
+
+	/// Resample the image to a different resolution
+	void resample(size_t w, size_t h);
 
 	/// Return the number of exposures
 	inline size_t size() const {

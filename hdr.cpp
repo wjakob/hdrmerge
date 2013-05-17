@@ -98,10 +98,10 @@ void ExposureSeries::demosaic(float *sensor2xyz) {
 
 	struct DemosaicBuffer {
 		/* Horizontally and vertically interpolated sensor colors */
-		float rgb[2][tsize][tsize][3];
+		float3 rgb[2][tsize][tsize];
 
 		/* CIElab color values */
-		float cielab[2][tsize][tsize][3];
+		float3 cielab[2][tsize][tsize];
 
 		/* Homogeneity map */
 		uint8_t homo[2][tsize][tsize];
@@ -113,7 +113,6 @@ void ExposureSeries::demosaic(float *sensor2xyz) {
 	cout << "AHD demosaicing .." << endl;
 
 	/* Allocate a big buffer for the interpolated colors */
-	typedef float float3[3];
 	image_demosaiced = new float3[width*height];
 
 	size_t offset = 0;
@@ -195,7 +194,7 @@ void ExposureSeries::demosaic(float *sensor2xyz) {
 			size_t x = left + (fc(left, y) & 1), color = fc(x, y);
 
 			for (; x<left+tsize && x<width-2; x += 2) {
-				float (*pix)[3] = image_demosaiced + y*width + x;
+				float3 *pix = image_demosaiced + y*width + x;
 
 				float interp_h = 0.25f * ((pix[-1][G] + pix[0][color] + pix[1][G]) * 2
 					  - pix[-2][color] - pix[2][color]);
@@ -212,9 +211,9 @@ void ExposureSeries::demosaic(float *sensor2xyz) {
 		for (int dir=0; dir<2; ++dir) {
 			for (size_t y=top+1; y<top+tsize-1 && y<height-3; ++y) {
 				for (size_t x = left+1; x<left+tsize-1 && x<width-3; ++x) {
-					float (*pix)[3] = image_demosaiced + y*width + x;
-					float (*interp)[3] = &buf.rgb[dir][y-top][x-left];
-					float (*lab)[3] = &buf.cielab[dir][y-top][x-left];
+					float3 *pix = image_demosaiced + y*width + x;
+					float3 *interp = &buf.rgb[dir][y-top][x-left];
+					float3 *lab = &buf.cielab[dir][y-top][x-left];
 
 					/* Determine the color at the current pixel */
 					int color = fc(x, y);
@@ -266,7 +265,7 @@ void ExposureSeries::demosaic(float *sensor2xyz) {
 				float ldiff[2][4], abdiff[2][4];
 
 				for (int dir=0; dir < 2; dir++) {
-					float (*lab)[3] = &buf.cielab[dir][y-top][x-left];
+					float3 *lab = &buf.cielab[dir][y-top][x-left];
 
 					for (int i=0; i < 4; i++) {
 						int offset = offset_table[i];
@@ -330,6 +329,12 @@ void ExposureSeries::transform_color(float *sensor2xyz, bool xyz) {
 	};
 	float M[3][3];
 
+	if (xyz) {
+		cout << "Transforming to XYZ color space .." << endl;
+	} else {
+		cout << "Transforming to sRGB color space .." << endl;
+	}
+
 	for (int i=0; i<3; ++i) {
 		for (int j=0; j<3; ++j) {
 			if (xyz) {
@@ -345,7 +350,7 @@ void ExposureSeries::transform_color(float *sensor2xyz, bool xyz) {
 
 	#pragma omp parallel for
 	for (size_t y=0; y<height; ++y) {
-		float (*ptr)[3] = image_demosaiced + y*width;
+		float3 *ptr = image_demosaiced + y*width;
 		for (size_t x=0; x<width; ++x) {
 			float accum[3] = {0, 0, 0};
 			for (int i=0; i<3; ++i)
@@ -359,6 +364,8 @@ void ExposureSeries::transform_color(float *sensor2xyz, bool xyz) {
 }
 
 void ExposureSeries::scale(float factor) {
+	cout << "Scaling the image by a factor of " << factor << " .." << endl;
+
 	if (image_merged) {
 		#pragma omp parallel for
 		for (size_t y=0; y<height; ++y) {
@@ -371,7 +378,7 @@ void ExposureSeries::scale(float factor) {
 	if (image_demosaiced) {
 		#pragma omp parallel for
 		for (size_t y=0; y<height; ++y) {
-			float (*ptr)[3] = image_demosaiced + y*width;
+			float3 *ptr = image_demosaiced + y*width;
 			for (size_t x=0; x<width; ++x) {
 				for (int i=0; i<3; ++i)
 					ptr[0][i] *= factor;
