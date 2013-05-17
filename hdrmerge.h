@@ -58,16 +58,22 @@ struct ExposureSeries {
 	int blacklevel, saturation, whitepoint;
 
 	/* Merged high dynamic range image (no demosaicing yet) */
-	float *merged;
+	float *image_merged;
+	
+	/* Merged and demosaiced image */
+	float (*image_demosaiced)[3];
 
 	/* dcraw-style color filter array description */
 	int filter;
 
-	inline ExposureSeries() : saturation(0), merged(NULL) { }
+	inline ExposureSeries() : saturation(0),
+		image_merged(NULL), image_demosaiced(NULL) { }
 
 	~ExposureSeries() {
-		if (merged)
-			delete[] merged;
+		if (image_merged)
+			delete[] image_merged;
+		if (image_demosaiced)
+			delete[] image_demosaiced;
 	}
 
 	/// Return the color at position (x, y)
@@ -103,7 +109,7 @@ struct ExposureSeries {
 	void merge();
 
 	/// Perform demosaicing
-	void demosaic(float *colormatrix);
+	void demosaic(float *sensor2xyz);
 
 	/// Return the number of exposures
 	inline size_t size() const {
@@ -121,9 +127,6 @@ extern int getProcessorCount();
 extern void writeOpenEXR(const std::string &filename, size_t w, size_t h,
 	int channels, float *data, const StringMap &metadata, bool writeHalf);
 
-/// Read an OpenEXR image (grayscale only atm)
-float *readOpenEXR(const std::string &filename, size_t &w, size_t &h);
-
 #define RS_SCALE (1.0f / (1.0f + RAND_MAX))
 
 /// Generate a uniformly distributed random number in [0, 1)
@@ -140,6 +143,10 @@ inline float clamp(float value, float min, float max) {
 	if (min > max)
 		std::swap(min, max);
 	return std::min(std::max(value, min), max);
+}
+
+inline float square(float value) {
+	return value*value;
 }
 
 #endif /* __HDRMERGE_H */
