@@ -113,13 +113,15 @@ void ExposureSeries::demosaic(float *sensor2xyz) {
 	cout << "AHD demosaicing .." << endl;
 
 	/* Allocate a big buffer for the interpolated colors */
-	float (*output)[3] = (float (*)[3]) calloc(width*height, sizeof(float)*3);
+	typedef float float3[3];
+	image_demosaiced = new float3[width*height];
+
 	size_t offset = 0;
 	float maxvalue = 0;
 	for (size_t y=0; y<height; ++y) {
 		for (size_t x=0; x<width; ++x) {
 			float value = image_merged[offset];
-			output[offset][fc(x, y)] = value;
+			image_demosaiced[offset][fc(x, y)] = value;
 			if (value > maxvalue)
 				maxvalue = value;
 			offset++;
@@ -141,7 +143,7 @@ void ExposureSeries::demosaic(float *sensor2xyz) {
 				for (size_t xs=x-1; xs != x+2; ++xs) {
 					if (ys < height && xs < width) {
 						int col = fc(xs, ys);
-						binval[col] += output[ys*width+xs][col];
+						binval[col] += image_demosaiced[ys*width+xs][col];
 						++bincount[col];
 					}
 				}
@@ -150,7 +152,7 @@ void ExposureSeries::demosaic(float *sensor2xyz) {
 			int col = fc(x, y);
 			for (int c=0; c<3; ++c) {
 				if (col != c)
-					output[y*width+x][c] = bincount[c] ? (binval[c]/bincount[c]) : 1.0f;
+					image_demosaiced[y*width+x][c] = bincount[c] ? (binval[c]/bincount[c]) : 1.0f;
 			}
 		}
 	}
@@ -193,7 +195,7 @@ void ExposureSeries::demosaic(float *sensor2xyz) {
 			size_t x = left + (fc(left, y) & 1), color = fc(x, y);
 
 			for (; x<left+tsize && x<width-2; x += 2) {
-				float (*pix)[3] = output + y*width + x;
+				float (*pix)[3] = image_demosaiced + y*width + x;
 
 				float interp_h = 0.25f * ((pix[-1][G] + pix[0][color] + pix[1][G]) * 2
 					  - pix[-2][color] - pix[2][color]);
@@ -210,7 +212,7 @@ void ExposureSeries::demosaic(float *sensor2xyz) {
 		for (int dir=0; dir<2; ++dir) {
 			for (size_t y=top+1; y<top+tsize-1 && y<height-3; ++y) {
 				for (size_t x = left+1; x<left+tsize-1 && x<width-3; ++x) {
-					float (*pix)[3] = output + y*width + x;
+					float (*pix)[3] = image_demosaiced + y*width + x;
 					float (*interp)[3] = &buf.rgb[dir][y-top][x-left];
 					float (*lab)[3] = &buf.cielab[dir][y-top][x-left];
 
@@ -304,11 +306,11 @@ void ExposureSeries::demosaic(float *sensor2xyz) {
 				if (hm[0] != hm[1]) {
 					/* One of the images was more homogeneous */
 					for (int col=0; col<3; ++col)
-						output[y*width+x][col] = buf.rgb[hm[1] > hm[0] ? 1 : 0][y-top][x-left][col];
+						image_demosaiced[y*width+x][col] = buf.rgb[hm[1] > hm[0] ? 1 : 0][y-top][x-left][col];
 				} else {
 					/* No clear winner, blend */
 					for (int col=0; col<3; ++col)
-						output[y*width+x][col] = 0.5f*(buf.rgb[0][y-top][x-left][col]
+						image_demosaiced[y*width+x][col] = 0.5f*(buf.rgb[0][y-top][x-left][col]
 							+ buf.rgb[1][y-top][x-left][col]);
 				}
 			}
@@ -318,6 +320,63 @@ void ExposureSeries::demosaic(float *sensor2xyz) {
 	delete[] buffers;
 	delete[] image_merged;
 	image_merged = NULL;
+}
 
-	image_demosaiced = output;
+void ExposureSeries::transform_color(float *sensor2xyz, bool xyz) {
+	const float xyz2rgb[3][3] = {
+		{ 3.240479f, -1.537150f, -0.498535f },
+		{-0.969256f, +1.875991f, +0.041556f },
+		{ 0.055648f, -0.204043f, +1.057311f }
+	};
+	float M[3][3];
+
+	for (int i=0; i<3; ++i) {
+		for (int j=0; j<3; ++j) {
+			if (xyz) {
+				M[i][j] = sensor2xyz[3*i+j];
+			} else {
+				float accum = 0;
+				for (int k=0; k<3; ++k)
+					accum += xyz2rgb[i][k] * sensor2xyz[3*k+j];
+				M[i][j] = accum;
+			}
+		}
+	}
+
+	#pragma omp parallel for
+	for (size_t y=0; y<height; ++y) {
+		float (*ptr)[3] = image_demosaiced + y*width;
+		for (size_t x=0; x<width; ++x) {
+			float accum[3] = {0, 0, 0};
+			for (int i=0; i<3; ++i)
+				for (int j=0; j<3; ++j)
+					accum[i] += M[i][j] * ptr[0][j];
+			for (int i=0; i<3; ++i)
+				ptr[0][i] = accum[i];
+			++ptr;
+		}
+	}
+}
+
+void ExposureSeries::scale(float factor) {
+	if (image_merged) {
+		#pragma omp parallel for
+		for (size_t y=0; y<height; ++y) {
+			float *ptr = image_merged + y*width;
+			for (size_t x=0; x<width; ++x)
+				*ptr++ *= factor;
+		}
+	}
+
+	if (image_demosaiced) {
+		#pragma omp parallel for
+		for (size_t y=0; y<height; ++y) {
+			float (*ptr)[3] = image_demosaiced + y*width;
+			for (size_t x=0; x<width; ++x) {
+				for (int i=0; i<3; ++i)
+					ptr[0][i] *= factor;
+				ptr++;
+			}
+		}
+	}
 }

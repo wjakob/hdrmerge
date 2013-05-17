@@ -111,6 +111,12 @@ struct ExposureSeries {
 	/// Perform demosaicing
 	void demosaic(float *sensor2xyz);
 
+	/// Transform the image into the right color space
+	void transform_color(float *sensor2xyz, bool xyz);
+
+	/// Scale the image by a factor
+	void scale(float factor);
+
 	/// Return the number of exposures
 	inline size_t size() const {
 		return exposures.size();
