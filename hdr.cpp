@@ -387,3 +387,44 @@ void ExposureSeries::scale(float factor) {
 		}
 	}
 }
+
+void ExposureSeries::crop(int offs_x, int offs_y, int w, int h) {
+	cout << "Cropping to " << w << "x" << h << " .." << endl;
+	if (offs_x < 0 || offs_y < 0 || w <= 0 || h <= 0 || offs_x+w > (int) width || offs_y+h > (int) height)
+		throw std::runtime_error("crop(): selected an invalid rectangle!");
+
+	if (image_merged) {
+		float *temp = new float[w*h];
+
+		for (int y=0; y<h; ++y) {
+			float *dst = temp + w * y;
+			float *src = image_merged + width * (y+offs_y) + offs_x;
+
+			for (int x=0; x<w; ++x)
+				*dst++ = *src++;
+		}
+		delete[] image_merged;
+		image_merged = temp;
+	}
+
+	if (image_demosaiced) {
+		float3 *temp = new float3[w*h];
+
+		for (int y=0; y<h; ++y) {
+			float3 *dst = temp + w * y;
+			float3 *src = image_demosaiced + width * (y+offs_y) + offs_x;
+
+			for (int x=0; x<w; ++x) {
+				for (int c=0; c<3; ++c)
+					(*dst)[c] = (*src)[c];
+				++dst;
+				++src;
+			}
+		}
+		delete[] image_demosaiced;
+		image_demosaiced = temp;
+	}
+
+	width = w;
+	height = h;
+}

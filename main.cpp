@@ -29,6 +29,48 @@ std::istream& operator>>(std::istream& in, EColorMode& unit) {
 	return in;
 }
 
+/// Windowed Lanczos filter
+class LanczosSincFilter : public ReconstructionFilter {
+public:
+	LanczosSincFilter(float radius = 3) : m_radius(radius) { }
+
+	float getRadius() const {
+		return m_radius;
+	}
+
+	float eval(float x) const {
+		x = std::abs(x);
+
+		if (x < 1e-4f)
+			return 1.0f;
+		else if (x > m_radius)
+			return 0.0f;
+
+		float x1 = M_PI * x;
+		float x2 = x1 / m_radius;
+
+		return (std::sin(x1) * std::sin(x2)) / (x1 * x2);
+	}
+private:
+	float m_radius;
+};
+
+/// Tent filter
+class TentFilter : public ReconstructionFilter {
+public:
+	TentFilter(float radius = 1) : m_radius(radius) { }
+
+	float getRadius() const {
+		return m_radius;
+	}
+
+	float eval(float x) const {
+		return std::max(0.0f, 1.0f - std::abs(x / m_radius));
+	}
+private:
+	float m_radius;
+};
+
 void help(char **argv, const po::options_description &desc) {
 	cout << "RAW to HDR merging tool, written by Wenzel Jakob <wenzel@cs.cornell.edu>" << endl
 		<< "Version 1.0 (May 2013). Source @ https://github.com/wjakob/hdrmerge" << endl
@@ -48,18 +90,25 @@ void help(char **argv, const po::options_description &desc) {
 		<< "  point mode." << endl
 		<< endl
 		<< "  The order of operations is (where all steps except 1 and 8 are optional)" << endl
-		<< "    1. Load RAWs -> 2. HDR Merge -> 3. Demosaic -> 4. Transform colors & scale -> " << endl
-		<< "    5. Remove vignetting -> 6. Crop -> 7. Resample -> 8. Write OpenEXR" << endl
+		<< "    1. Load RAWs -> 2. HDR Merge -> 3. Demosaic -> 4. Transform colors -> 5. [scale] -> " << endl
+		<< "    5. [Remove vignetting] -> 6. [Crop] -> 7. [Resample] -> 8. Write OpenEXR" << endl
+		<< endl
+		<< "The following sections contain additional information on some of these steps." << endl
 		<< endl
 		<< "Step 1: Load RAWs" << endl
 		<< "  hdrmerge uses the RawSpeed library to support a wide range of RAW formats." << endl
-		<< "  For simplicity, is currently restricted to sensors having a standard RGB" << endl
-		<< "  Bayer grid. From time to time, it may be necessary to update RawSpeed to" << endl
-		<< "  support new camera models. To do this, run the 'rawspeed/update_rawspeed.sh' " << endl
-		<< "  shell script and recompile." << endl
+		<< "  For simplicity, HDR processing is currently restricted to sensors having a" << endl
+		<< "  standard RGB Bayer grid. From time to time, it may be necessary to update" << endl
+		<< "  the RawSpeed source code to support new camera models. To do this, run the" << endl
+		<< "  'rawspeed/update_rawspeed.sh' shell script and recompile." << endl
 		<< endl
 		<< "Step 2: Merge" << endl
 		<< "  TBD" << endl
+		<< endl
+		<< "Step 7: Resample" << endl
+		<< "  This program can do high quality Lanczos resampling to get lower resolution" << endl
+		<< "  output if desired. This can sometimes cause ringing on high frequency edges," << endl
+		<< "  in which case a Tent filter may be preferable (selectable via --rfilter)." << endl
 		<< endl
 		<< desc << endl
 	    << "Note that all options can also be specified permanently by creating a text" << endl
@@ -81,23 +130,28 @@ int main(int argc, char **argv) {
 
 	options.add_options()
 		("help", "Print information on how to use this program")
-		("output", po::value<std::string>()->default_value("output.exr"), 
-			"Name of the output file in OpenEXR format")
-		("scale", po::value<float>(),
-			"Optional scale factor that is applied to the image")
-		("resample", po::value<std::string>(),
-			"Resample the image to a different resolution. 'arg' can be "
-			"a pair of integers like 1188x790 or the max. resolution ("
-			"maintaining the aspect ratio)")
+		("demosaic", po::value<bool>()->default_value(true, "yes"),
+			"Perform demosaicing? If disabled, the raw Bayer grid is exported as a grayscale EXR file")
 		("colormode", po::value<EColorMode>()->default_value(ESRGB, "sRGB"),
 			"Output color space (one of 'native'/'sRGB'/'XYZ')")
 		("sensor2xyz", po::value<std::string>()->multitoken(), 
 			"Matrix that transforms from the sensor color space to XYZ tristimulus values")
-		("demosaic", po::value<bool>()->default_value(true, "yes"),
-			"Perform demosaicing? If disabled, the raw Bayer grid is exported as a grayscale EXR file")
+		("scale", po::value<float>(),
+			"Optional scale factor that is applied to the image")
+		("crop", po::value<std::string>(),
+			"Crop to a rectangular area. 'arg' should be specified in the form x,y,width,height")
+		("resample", po::value<std::string>(),
+			"Resample the image to a different resolution. 'arg' can be "
+			"a pair of integers like 1188x790 or the max. resolution ("
+			"maintaining the aspect ratio)")
+		("rfilter", po::value<std::string>()->default_value("lanczos"),
+			"Resampling filter used by the --resample option (available choices: "
+			"'tent' or 'lanczos')")
 		("half", po::value<bool>()->default_value(true, "yes"),
 			"To save storage, hdrmerge writes half precision files by "
-			"default (set to 'no' for single precision)");
+			"default (set to 'no' for single precision)")
+		("output", po::value<std::string>()->default_value("output.exr"), 
+			"Name of the output file in OpenEXR format");
 
 	hidden_options.add_options()
 		("input-files", po::value<std::vector<std::string>>(), "Input files");
@@ -140,7 +194,27 @@ int main(int argc, char **argv) {
 		}
 
 		if (resample.size() != 1 && resample.size() != 2) {
-			cerr << "Unable to parse the 'resample' argument!" << endl;
+			cerr << "Unable to parse the 'resample' argument (expected 1 or 2 numbers)!" << endl;
+			return -1;
+		}
+	}
+
+	std::vector<int> crop;
+	if (vm.count("crop")) {
+		std::string argument = vm["crop"].as<std::string>();
+		boost::char_separator<char> sep(", ");
+		boost::tokenizer<boost::char_separator<char>> tokens(argument, sep);
+
+		try {
+			for (auto it = tokens.begin(); it != tokens.end(); ++it)
+				crop.push_back(boost::lexical_cast<float>(*it));
+		} catch (const boost::bad_lexical_cast &) {
+			cerr << "Unable to parse the 'crop' argument!" << endl;
+			return -1;
+		}
+
+		if (crop.size() != 4) {
+			cerr << "Unable to parse the 'crop' argument (expected 4 numbers)!" << endl;
 			return -1;
 		}
 	}
@@ -225,13 +299,17 @@ int main(int argc, char **argv) {
 			}
 		}
 
-		/// Step 4b: Scale
+		/// Step 5: Scale
 		if (scale != 1.0f)
 			es.scale(scale);
 
-		/// Step 5: Remove vignetting
-		/// Step 6: Crop
-		/// Step 7: Resample
+		/// Step 6: Remove vignetting
+
+		/// Step 7: Crop
+		if (!crop.empty())
+			es.crop(crop[0], crop[1], crop[2], crop[3]);
+
+		/// Step 8: Resample
 		if (!resample.empty()) {
 			int w, h;
 
@@ -244,13 +322,22 @@ int main(int argc, char **argv) {
 				h = resample[1];
 			}
 
-			if (demosaic)
-				es.resample(w, h);
-			else
+			if (demosaic) {
+				std::string rfilter = boost::to_lower_copy(vm["rfilter"].as<std::string>());
+				if (rfilter == "lanczos") {
+					es.resample(LanczosSincFilter(), w, h);
+				} else if (rfilter == "tent") {
+					es.resample(TentFilter(), w, h);
+				} else {
+					cout << "Invalid resampling filter chosen (must be 'lanczos' / 'tent')" << endl;
+					return -1;
+				}
+			} else {
 				cout << "Warning: resampling a non-demosaiced image does not make much sense -- ignoring." << endl;
+			}
 		}
 
-		// Step 8: Write output
+		// Step 9: Write output
 		std::string output = vm["output"].as<std::string>();
 		bool half = vm["half"].as<bool>();
 

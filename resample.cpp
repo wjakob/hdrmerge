@@ -1,39 +1,6 @@
 #include "hdrmerge.h"
 #include <assert.h>
 
-/// Abstract reconstruction filter
-class ReconstructionFilter {
-public:
-	virtual float getRadius() const = 0;
-	virtual float eval(float x) const = 0;
-};
-
-/// Windowed Lanczos filter
-class LanczosSincFilter : public ReconstructionFilter {
-public:
-	LanczosSincFilter(float radius = 3) : m_radius(radius) { }
-
-	float getRadius() const {
-		return m_radius;
-	}
-
-	float eval(float x) const {
-		x = std::abs(x);
-
-		if (x < 1e-4f)
-			return 1.0f;
-		else if (x > m_radius)
-			return 0.0f;
-
-		float x1 = M_PI * x;
-		float x2 = x1 / m_radius;
-
-		return (std::sin(x1) * std::sin(x2)) / (x1 * x2);
-	}
-private:
-	float m_radius;
-};
-
 /**
  * Utility class for efficiently resampling discrete 
  * datasets to different resolutions
@@ -53,10 +20,10 @@ struct Resampler {
 	 * \param targetRes
 	 *      Desired target resolution
 	 */
-	Resampler(const ReconstructionFilter *rfilter, 
+	Resampler(const ReconstructionFilter &rfilter, 
 			int sourceRes, int targetRes) : m_sourceRes(sourceRes), m_targetRes(targetRes) {
 		assert(sourceRes > 0 && targetRes > 0);
-		float filterRadius = rfilter->getRadius(), scale = 1.0f, invScale = 1.0f;
+		float filterRadius = rfilter.getRadius(), scale = 1.0f, invScale = 1.0f;
 
 		/* Low-pass filter: scale reconstruction filters when downsampling */
 		if (targetRes < sourceRes) {
@@ -90,7 +57,7 @@ struct Resampler {
 				float pos = m_start[i] + j + (float) 0.5f - center;
 
 				/* Perform the evaluation and record the weight */
-				float weight = rfilter->eval(pos * invScale);
+				float weight = rfilter.eval(pos * invScale);
 				m_weights[i * m_taps + j] = weight;
 				sum += weight;
 			}
@@ -191,15 +158,13 @@ private:
 };
 
 
-void ExposureSeries::resample(size_t width_t, size_t height_t) {
-	cout << "Resampling to " << width_t << "x" << height_t << endl;
+void ExposureSeries::resample(const ReconstructionFilter &rfilter, size_t width_t, size_t height_t) {
+	cout << "Resampling to " << width_t << "x" << height_t << " .." << endl;
 	assert(width_t > 0 && height_t > 0);
-
-	LanczosSincFilter rfilter;
 
 	if (width != width_t) {
 		/* Re-sample along the X direction */
-		Resampler r(&rfilter, width, width_t);
+		Resampler r(rfilter, width, width_t);
 
 		float3 *temp = new float3[width_t * height];
 
@@ -217,7 +182,7 @@ void ExposureSeries::resample(size_t width_t, size_t height_t) {
 
 	if (height != height_t) {
 		/* Re-sample along the Y direction */
-		Resampler r(&rfilter, height, height_t);
+		Resampler r(rfilter, height, height_t);
 
 		float3 *temp = new float3[width_t * height_t];
 
