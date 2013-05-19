@@ -28,7 +28,7 @@ include_directories(${Boost_INCLUDE_DIR})
 set(CMAKE_CXX_FLAGS "-std=c++11 -g -Wall -fno-omit-frame-pointer ${CMAKE_CXX_FLAGS}")
 
 add_subdirectory(rawspeed)
-add_executable(hdrmerge input.cpp util.cpp main.cpp hdr.cpp)
+add_executable(hdrmerge input.cpp util.cpp main.cpp hdr.cpp resample.cpp)
 target_link_libraries(hdrmerge rawspeed ${LIBXML2_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT}
 	${JPEG_LIBRARIES} ${OPENEXR_ILMIMF_LIBRARY} ${OPENEXR_HALF_LIBRARY}
 	${OPENEXR_IEX_LIBRARY} ${OPENEXR_ILMBASE_LIBRARY} ${EXIV2_LIBRARY}

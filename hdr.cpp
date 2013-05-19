@@ -15,7 +15,7 @@ float compute_weight(uint16_t value, uint16_t blacklevel, uint16_t saturation) {
 }
 
 void ExposureSeries::merge() {
-	merged = new float[width * height];
+	image_merged = new float[width * height];
 
 	/* Precompute some tables for weights and normalized pixel values */
 	float weight_tbl[0xFFFF], value_tbl[0xFFFF];
@@ -29,7 +29,7 @@ void ExposureSeries::merge() {
 		#pragma omp parallel for
 		for (size_t y=0; y<height; ++y) {
 			uint16_t *src = exposures[0].image + y * width;
-			float *dst = merged + y * width;
+			float *dst = image_merged + y * width;
 			for (size_t x=0; x<width; ++x)
 				*dst++ = value_tbl[*src++];
 		}
@@ -83,7 +83,7 @@ void ExposureSeries::merge() {
 				value /= total_exposure;
 //			cout << " ====>> reference = " << value << endl;
 
-			merged[offset++] = value;
+			image_merged[offset++] = value;
 		}
 	}
 	for (size_t i=0; i<exposures.size(); ++i)
@@ -91,32 +91,90 @@ void ExposureSeries::merge() {
 }
 
 
-void ExposureSeries::demosaic(float *colormatrix) {
-	const int R = 0, G = 1, B = 2;
-	const int tsize = 256;
+void ExposureSeries::demosaic(float *sensor2xyz) {
+	/* This function is based on the AHD code from dcraw, which in turn
+       builds on work by Keigo Hirakawa, Thomas Parks, and Paul Lee. */
+	const int G = 1, tsize = 256;
 
 	struct DemosaicBuffer {
-		float rgb[2][tsize][tsize][3];
+		/* Horizontally and vertically interpolated sensor colors */
+		float3 rgb[2][tsize][tsize];
+
+		/* CIElab color values */
+		float3 cielab[2][tsize][tsize];
+
+		/* Homogeneity map */
+		uint8_t homo[2][tsize][tsize];
 	};
-
-	/* Allocate a big buffer for the interpolated colors */
-	float (*output)[3] = (float (*)[3]) calloc(width*height, sizeof(float)*3);
-
-	const float xyz_rgb[3][3] = { /* XYZ from RGB */
-        { 0.412453, 0.357580, 0.180423 },
-        { 0.212671, 0.715160, 0.072169 },
-        { 0.019334, 0.119193, 0.950227 }
-    };
 
 	/* Temporary tile storage */
 	DemosaicBuffer *buffers = new DemosaicBuffer[omp_get_max_threads()];
+	
+	cout << "AHD demosaicing .." << endl;
+
+	/* Allocate a big buffer for the interpolated colors */
+	image_demosaiced = new float3[width*height];
 
 	size_t offset = 0;
+	float maxvalue = 0;
 	for (size_t y=0; y<height; ++y) {
 		for (size_t x=0; x<width; ++x) {
-			output[offset][fc(x, y)] = merged[offset];
+			float value = image_merged[offset];
+			image_demosaiced[offset][fc(x, y)] = value;
+			if (value > maxvalue)
+				maxvalue = value;
 			offset++;
 		}
+	}
+
+	/* The AHD implementation below doesn't interpolate colors on a 5-pixel wide
+       boundary region -> use a naive averaging method on this region instead. */
+	const size_t border = 5;
+	for (size_t y=0; y<height; ++y) {
+		for (size_t x=0; x<width; ++x) {
+			if (x == border && y >= border && y < height-border)
+				x = width-border; /* Jump over the center part of the image */
+
+			float binval[3] = {0, 0, 0};
+			int bincount[3] = {0, 0, 0};
+
+			for (size_t ys=y-1; ys != y+2; ++ys) {
+				for (size_t xs=x-1; xs != x+2; ++xs) {
+					if (ys < height && xs < width) {
+						int col = fc(xs, ys);
+						binval[col] += image_demosaiced[ys*width+xs][col];
+						++bincount[col];
+					}
+				}
+			}
+
+			int col = fc(x, y);
+			for (int c=0; c<3; ++c) {
+				if (col != c)
+					image_demosaiced[y*width+x][c] = bincount[c] ? (binval[c]/bincount[c]) : 1.0f;
+			}
+		}
+	}
+
+	/* Matrix that goes from sensor to normalized XYZ tristimulus values */
+	float sensor2xyz_n[3][3], sensor2xyz_n_maxvalue = 0;
+	const float d65_white[3] = { 0.950456, 1, 1.088754 };
+	for (int i=0; i<3; ++i) {
+		for (int j=0; j<3; ++j) {
+			sensor2xyz_n[i][j] = sensor2xyz[i*3+j] / d65_white[i];
+			sensor2xyz_n_maxvalue = std::max(sensor2xyz_n_maxvalue, sensor2xyz_n[i][j]);
+		}
+	}
+
+	/* Scale factor that is guaranteed to push XYZ values into the range [0, 1] */
+	float scale = 1.0 / (maxvalue * sensor2xyz_n_maxvalue);
+
+	/* Precompute a table for the nonlinear part of the CIELab conversion */
+	const int cielab_table_size = 0xFFFF;
+	float cielab_table[cielab_table_size];
+	for (int i=0; i<cielab_table_size; ++i) {
+		float r = i * 1.0f / (cielab_table_size-1);
+		cielab_table[i] = r > 0.008856 ? std::pow(r, 1.0f / 3.0f) : 7.787f*r + 4.0f/29.0f;
 	}
 
 	/* Process the image in tiles */
@@ -125,11 +183,10 @@ void ExposureSeries::demosaic(float *colormatrix) {
 		for (size_t left = 2; left < width - 5; left += tsize - 6)
 			tiles.push_back(std::make_pair(left, top));
 
-	//#pragma omp parallel for /* Parallelize over tiles */ ///XXX
+	#pragma omp parallel for /* Parallelize over tiles */
 	for (size_t tile=0; tile<tiles.size(); ++tile) {
-		DemosaicBuffer &buf = buffers[0];//omp_get_thread_id()]; XXX
+		DemosaicBuffer &buf = buffers[omp_get_thread_num()];
 		size_t left = tiles[tile].first, top = tiles[tile].second;
-		memset(buf.rgb, 0, sizeof(float)*3*2*tsize*tsize);//XXX
 
 		for (size_t y=top; y<top+tsize && y<height-2; ++y) {
 			/* Interpolate green horizontally and vertically, starting
@@ -137,12 +194,12 @@ void ExposureSeries::demosaic(float *colormatrix) {
 			size_t x = left + (fc(left, y) & 1), color = fc(x, y);
 
 			for (; x<left+tsize && x<width-2; x += 2) {
-				float (*pix)[3] = output + y*width + x;
+				float3 *pix = image_demosaiced + y*width + x;
 
 				float interp_h = 0.25f * ((pix[-1][G] + pix[0][color] + pix[1][G]) * 2
 					  - pix[-2][color] - pix[2][color]);
 				float interp_v = 0.25*((pix[-width][G] + pix[0][color] + pix[width][G]) * 2
-					  - pix[-2*width][color] - pix[2*width][color]) ;
+					  - pix[-2*width][color] - pix[2*width][color]);
 
 				/* Don't allow the interpolation to create new local maxima / minima */
 				buf.rgb[0][y-top][x-left][G] = clamp(interp_h, pix[-1][G], pix[1][G]);
@@ -154,8 +211,9 @@ void ExposureSeries::demosaic(float *colormatrix) {
 		for (int dir=0; dir<2; ++dir) {
 			for (size_t y=top+1; y<top+tsize-1 && y<height-3; ++y) {
 				for (size_t x = left+1; x<left+tsize-1 && x<width-3; ++x) {
-					float (*pix)[3] = output + y*width + x;
-					float (*interp)[3] = &buf.rgb[dir][y-top][x-left];
+					float3 *pix = image_demosaiced + y*width + x;
+					float3 *interp = &buf.rgb[dir][y-top][x-left];
+					float3 *lab = &buf.cielab[dir][y-top][x-left];
 
 					/* Determine the color at the current pixel */
 					int color = fc(x, y);
@@ -163,49 +221,171 @@ void ExposureSeries::demosaic(float *colormatrix) {
 					if (color == G) {
 						color = fc(x, y+1);
 						/* Interpolate both red and green */
-						float interp = pix[0][G] + (0.5f*(
-						    pix[-1][2-color] + pix[1][2-color] - interp[-1][G] - interp[1][G]));
-						interp[0][2-color] = std::max(0.0f, interp);
+						interp[0][2-color] = std::max(0.0f, pix[0][G] + (0.5f*(
+						    pix[-1][2-color] + pix[1][2-color] - interp[-1][G] - interp[1][G])));
 
-						interp = pix[0][G] + (0.5f*(
-							pix[-width][color] + pix[width][color] - interp[-tsize][1] - interp[tsize][1]));
-						interp[0][color] = std::max(0.0f, interp);
+						interp[0][color] = std::max(0.0f,  pix[0][G] + (0.5f*(
+							pix[-width][color] + pix[width][color] - interp[-tsize][1] - interp[tsize][1])));
 					} else {
 						/* Interpolate the other color */
 						color = 2 - color;
-						float interp = interp[0][G] + (0.25f * (
+						interp[0][color] = std::max(0.0f, interp[0][G] + (0.25f * (
 								pix[-width-1][color] + pix[-width+1][color]
 							  + pix[+width-1][color] + pix[+width+1][color]
 							  - interp[-tsize-1][G] - interp[-tsize+1][G]
-							  - interp[+tsize-1][G] - interp[+tsize+1][G]));
-						interp[0][color] = std::max(0.0f, interp);
+							  - interp[+tsize-1][G] - interp[+tsize+1][G])));
 					}
 
 					/* Forward the color at the current pixel with out modification */
 					color = fc(x, y);
-					rix[0][color] = pix[0][color];
+					interp[0][color] = pix[0][color];
 
-					float rgb[3];
+					/* Convert to CIElab */
+					float xyz[3] = { 0, 0, 0 };
 					for (int i=0; i<3; ++i)
 						for (int j=0; j<3; ++j)
-							colormatrix[3*i+j]* rix[0][j]
-						}
-					}
+							xyz[i] += sensor2xyz_n[i][j] * interp[0][j];
+
+					for (int i=0; i<3; ++i)
+						xyz[i] = cielab_table[std::max(0, std::min(cielab_table_size-1, 
+								(int) (xyz[i] * scale * cielab_table_size)))];
+
+					lab[0][0] = (116.0f * xyz[1] - 16);
+					lab[0][1] = 500.0f * (xyz[0] - xyz[1]);
+					lab[0][2] = 200.0f * (xyz[1] - xyz[2]);
 				}
 			}
 		}
 
-		writeOpenEXR("test0.exr", tsize, tsize, 3, (float *) buf.rgb[0], metadata, false);
-		writeOpenEXR("test1.exr", tsize, tsize, 3, (float *) buf.rgb[1], metadata, false);
+		/*  Build homogeneity maps from the CIELab images: */
+		const int offset_table[4] = { -1, 1, -tsize, tsize };
+		memset(buf.homo, 0, 2*tsize*tsize);
+		for (size_t y=top+2; y < top+tsize-2 && y < height-4; ++y) {
+			for (size_t x=left+2; x< left+tsize-2 && x < width-4; ++x) {
+				float ldiff[2][4], abdiff[2][4];
 
-		exit(-1);
+				for (int dir=0; dir < 2; dir++) {
+					float3 *lab = &buf.cielab[dir][y-top][x-left];
+
+					for (int i=0; i < 4; i++) {
+						int offset = offset_table[i];
+
+						/* Luminance and chromaticity differences in 4 directions,
+						   for each of the two interpolated images */
+						ldiff[dir][i] = std::abs(lab[0][0] - lab[offset][0]);
+						abdiff[dir][i] = square(lab[0][1] - lab[offset][1])
+						   + square(lab[0][2] - lab[offset][2]);
+					}
+				}
+
+				float leps  = std::min(std::max(ldiff[0][0], ldiff[0][1]),
+				                       std::max(ldiff[1][2], ldiff[1][3]));
+				float abeps = std::min(std::max(abdiff[0][0], abdiff[0][1]),
+				                       std::max(abdiff[1][2], abdiff[1][3]));
+
+				/* Count the number directions in which the above thresholds can
+				   be maintained, for each of the two interpolated images */
+				for (int dir=0; dir < 2; dir++)
+					for (int i=0; i < 4; i++)
+						if (ldiff[dir][i] <= leps && abdiff[dir][i] <= abeps)
+							buf.homo[dir][y-top][x-left]++;
+			}
+		}
+
+		/*  Combine the most homogenous pixels for the final result */
+		for (size_t y=top+3; y < top+tsize-3 && y < height-5; ++y) {
+			for (size_t x=left+3; x < left+tsize-3 && x < width-5; ++x) {
+				/* Look, which of the to images is more homogeneous in a 3x3 neighborhood */
+				int hm[2] = {0, 0};
+				for (int dir=0; dir < 2; dir++)
+					for (size_t i=y-top-1; i <= y-top+1; i++)
+						for (size_t j=x-left-1; j <= x-left+1; j++)
+							hm[dir] += buf.homo[dir][i][j];
+
+				if (hm[0] != hm[1]) {
+					/* One of the images was more homogeneous */
+					for (int col=0; col<3; ++col)
+						image_demosaiced[y*width+x][col] = buf.rgb[hm[1] > hm[0] ? 1 : 0][y-top][x-left][col];
+				} else {
+					/* No clear winner, blend */
+					for (int col=0; col<3; ++col)
+						image_demosaiced[y*width+x][col] = 0.5f*(buf.rgb[0][y-top][x-left][col]
+							+ buf.rgb[1][y-top][x-left][col]);
+				}
+			}
+		}
 	}
 
-#if 0
-	//writeOpenEXR("test.exr", es.width, es.height, 1, es.image, es.metadata, false);
-#endif
-
 	delete[] buffers;
+	delete[] image_merged;
+	image_merged = NULL;
+}
+
+void ExposureSeries::transform_color(float *sensor2xyz, bool xyz) {
+	const float xyz2rgb[3][3] = {
+		{ 3.240479f, -1.537150f, -0.498535f },
+		{-0.969256f, +1.875991f, +0.041556f },
+		{ 0.055648f, -0.204043f, +1.057311f }
+	};
+	float M[3][3];
+
+	if (xyz) {
+		cout << "Transforming to XYZ color space .." << endl;
+	} else {
+		cout << "Transforming to sRGB color space .." << endl;
+	}
+
+	for (int i=0; i<3; ++i) {
+		for (int j=0; j<3; ++j) {
+			if (xyz) {
+				M[i][j] = sensor2xyz[3*i+j];
+			} else {
+				float accum = 0;
+				for (int k=0; k<3; ++k)
+					accum += xyz2rgb[i][k] * sensor2xyz[3*k+j];
+				M[i][j] = accum;
+			}
+		}
+	}
+
+	#pragma omp parallel for
+	for (size_t y=0; y<height; ++y) {
+		float3 *ptr = image_demosaiced + y*width;
+		for (size_t x=0; x<width; ++x) {
+			float accum[3] = {0, 0, 0};
+			for (int i=0; i<3; ++i)
+				for (int j=0; j<3; ++j)
+					accum[i] += M[i][j] * ptr[0][j];
+			for (int i=0; i<3; ++i)
+				ptr[0][i] = accum[i];
+			++ptr;
+		}
+	}
+}
+
+void ExposureSeries::scale(float factor) {
+	cout << "Scaling the image by a factor of " << factor << " .." << endl;
+
+	if (image_merged) {
+		#pragma omp parallel for
+		for (size_t y=0; y<height; ++y) {
+			float *ptr = image_merged + y*width;
+			for (size_t x=0; x<width; ++x)
+				*ptr++ *= factor;
+		}
+	}
+
+	if (image_demosaiced) {
+		#pragma omp parallel for
+		for (size_t y=0; y<height; ++y) {
+			float3 *ptr = image_demosaiced + y*width;
+			for (size_t x=0; x<width; ++x) {
+				for (int i=0; i<3; ++i)
+					ptr[0][i] *= factor;
+				ptr++;
+			}
+		}
+	}
 }
 
 

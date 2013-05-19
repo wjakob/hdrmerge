@@ -14,7 +14,7 @@ void writeOpenEXR(const std::string &filename, size_t w, size_t h, int nChannels
 
 	Imf::ChannelList &channels = header.channels();
 
-	cout << "Writing " << filename << " .. " << endl;
+	cout << "Writing " << filename << " (" << w << "x" << h << ", " << nChannels << " channels) .. " << endl;
 	if (nChannels == 3) {
 		if (writeHalf) {
 			channels.insert("R", Imf::Channel(Imf::HALF));
@@ -80,21 +80,6 @@ void writeOpenEXR(const std::string &filename, size_t w, size_t h, int nChannels
 	}
 }
 
-float *readOpenEXR(const std::string &filename, size_t &w, size_t &h) {
-	Imf::setGlobalThreadCount(getProcessorCount());
-	Imf::InputFile file(filename.c_str());
-
-	Imath::Box2i dataWindow = file.header().dataWindow();
-	w = dataWindow.max.x - dataWindow.min.x + 1;
-	h = dataWindow.max.y - dataWindow.min.y + 1;
-
-	Imf::FrameBuffer frameBuffer;
-	float *data = new float[w*h];
-	frameBuffer.insert("Y", Imf::Slice(Imf::FLOAT, (char *) data, sizeof(float), sizeof(float)*w));
-	file.setFrameBuffer(frameBuffer);
-	file.readPixels(dataWindow.min.y, dataWindow.max.y);
-	return data;
-}
 int getProcessorCount() {
 	return sysconf(_SC_NPROCESSORS_CONF);
 }

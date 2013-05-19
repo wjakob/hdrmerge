@@ -15,6 +15,7 @@ using std::cerr;
 using std::endl;
 
 typedef std::map<std::string, std::string> StringMap;
+typedef float float3[3];
 
 struct Exposure {
 	std::string filename;
@@ -58,16 +59,22 @@ struct ExposureSeries {
 	int blacklevel, saturation, whitepoint;
 
 	/* Merged high dynamic range image (no demosaicing yet) */
-	float *merged;
+	float *image_merged;
+	
+	/* Merged and demosaiced image */
+	float3 *image_demosaiced;
 
 	/* dcraw-style color filter array description */
 	int filter;
 
-	inline ExposureSeries() : saturation(0), merged(NULL) { }
+	inline ExposureSeries() : saturation(0),
+		image_merged(NULL), image_demosaiced(NULL) { }
 
 	~ExposureSeries() {
-		if (merged)
-			delete[] merged;
+		if (image_merged)
+			delete[] image_merged;
+		if (image_demosaiced)
+			delete[] image_demosaiced;
 	}
 
 	/// Return the color at position (x, y)
@@ -103,7 +110,16 @@ struct ExposureSeries {
 	void merge();
 
 	/// Perform demosaicing
-	void demosaic(float *colormatrix);
+	void demosaic(float *sensor2xyz);
+
+	/// Transform the image into the right color space
+	void transform_color(float *sensor2xyz, bool xyz);
+
+	/// Scale the image brightness by a given factor
+	void scale(float factor);
+
+	/// Resample the image to a different resolution
+	void resample(size_t w, size_t h);
 
 	/// Return the number of exposures
 	inline size_t size() const {
@@ -121,9 +137,6 @@ extern int getProcessorCount();
 extern void writeOpenEXR(const std::string &filename, size_t w, size_t h,
 	int channels, float *data, const StringMap &metadata, bool writeHalf);
 
-/// Read an OpenEXR image (grayscale only atm)
-float *readOpenEXR(const std::string &filename, size_t &w, size_t &h);
-
 #define RS_SCALE (1.0f / (1.0f + RAND_MAX))
 
 /// Generate a uniformly distributed random number in [0, 1)
@@ -140,6 +153,10 @@ inline float clamp(float value, float min, float max) {
 	if (min > max)
 		std::swap(min, max);
 	return std::min(std::max(value, min), max);
+}
+
+inline float square(float value) {
+	return value*value;
 }
 
 #endif /* __HDRMERGE_H */
