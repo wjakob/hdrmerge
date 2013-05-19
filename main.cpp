@@ -29,6 +29,48 @@ std::istream& operator>>(std::istream& in, EColorMode& unit) {
 	return in;
 }
 
+/// Windowed Lanczos filter
+class LanczosSincFilter : public ReconstructionFilter {
+public:
+	LanczosSincFilter(float radius = 3) : m_radius(radius) { }
+
+	float getRadius() const {
+		return m_radius;
+	}
+
+	float eval(float x) const {
+		x = std::abs(x);
+
+		if (x < 1e-4f)
+			return 1.0f;
+		else if (x > m_radius)
+			return 0.0f;
+
+		float x1 = M_PI * x;
+		float x2 = x1 / m_radius;
+
+		return (std::sin(x1) * std::sin(x2)) / (x1 * x2);
+	}
+private:
+	float m_radius;
+};
+
+/// Tent filter
+class TentFilter : public ReconstructionFilter {
+public:
+	TentFilter(float radius = 1) : m_radius(radius) { }
+
+	float getRadius() const {
+		return m_radius;
+	}
+
+	float eval(float x) const {
+		return std::max(0.0f, 1.0f - std::abs(x / m_radius));
+	}
+private:
+	float m_radius;
+};
+
 void help(char **argv, const po::options_description &desc) {
 	cout << "RAW to HDR merging tool, written by Wenzel Jakob <wenzel@cs.cornell.edu>" << endl
 		<< "Version 1.0 (May 2013). Source @ https://github.com/wjakob/hdrmerge" << endl
@@ -43,23 +85,32 @@ void help(char **argv, const po::options_description &desc) {
 		<< "  present in the input RAW files is also copied over into the output EXR file." << endl
 		<< "  The program automatically checks for common mistakes like duplicate exposures," << endl
 		<< "  leaving autofocus or auto-ISO turned on by accident, and it can do useful " << endl
-		<< "  operations like cropping, resampling, and removing vignetting. Used with " << endl 
+		<< "  operations like cropping, resampling, and removing vignetting. Used with " << endl
 		<< "  just a single image, it works a lot like a hypothetical 'dcraw' in floating" << endl
 		<< "  point mode." << endl
 		<< endl
-		<< "  The order of operations is (where all steps except 1 and 8 are optional)" << endl
-		<< "    1. Load RAWs -> 2. HDR Merge -> 3. Demosaic -> 4. Transform colors & scale -> " << endl
-		<< "    5. Remove vignetting -> 6. Crop -> 7. Resample -> 8. Write OpenEXR" << endl
+		<< "  The order of operations is as follows (all steps except 1 and 10 are optional" << endl
+		<< "  brackets indicate ones that disabled by default):" << endl << endl
+		<< "    1. Load RAWs -> 2. HDR Merge -> 3. Demosaic -> 4. Transform colors -> " << endl
+		<< "    5. [Whitebalance] -> 6. [Scale] -> 7. [Remove vignetting] -> 8. [Crop] -> " << endl
+		<< "    9. [Resample] -> 8. Write OpenEXR" << endl
+		<< endl
+		<< "The following sections contain additional information on some of these steps." << endl
 		<< endl
 		<< "Step 1: Load RAWs" << endl
 		<< "  hdrmerge uses the RawSpeed library to support a wide range of RAW formats." << endl
-		<< "  For simplicity, is currently restricted to sensors having a standard RGB" << endl
-		<< "  Bayer grid. From time to time, it may be necessary to update RawSpeed to" << endl
-		<< "  support new camera models. To do this, run the 'rawspeed/update_rawspeed.sh' " << endl
-		<< "  shell script and recompile." << endl
+		<< "  For simplicity, HDR processing is currently restricted to sensors having a" << endl
+		<< "  standard RGB Bayer grid. From time to time, it may be necessary to update" << endl
+		<< "  the RawSpeed source code to support new camera models. To do this, run the" << endl
+		<< "  'rawspeed/update_rawspeed.sh' shell script and recompile." << endl
 		<< endl
 		<< "Step 2: Merge" << endl
 		<< "  TBD" << endl
+		<< endl
+		<< "Step 7: Resample" << endl
+		<< "  This program can do high quality Lanczos resampling to get lower resolution" << endl
+		<< "  output if desired. This can sometimes cause ringing on high frequency edges," << endl
+		<< "  in which case a Tent filter may be preferable (selectable via --rfilter)." << endl
 		<< endl
 		<< desc << endl
 	    << "Note that all options can also be specified permanently by creating a text" << endl
@@ -80,24 +131,33 @@ int main(int argc, char **argv) {
 	po::variables_map vm;
 
 	options.add_options()
-		("help", "Print information on how to use this program")
-		("output", po::value<std::string>()->default_value("output.exr"), 
-			"Name of the output file in OpenEXR format")
+		("help", "Print information on how to use this program\n")
+		("demosaic", po::value<bool>()->default_value(true, "yes"),
+			"Perform demosaicing? If disabled, the raw Bayer grid is exported as a grayscale EXR file\n")
+		("colormode", po::value<EColorMode>()->default_value(ESRGB, "sRGB"),
+			"Output color space (one of 'native'/'sRGB'/'XYZ')\n")
+		("sensor2xyz", po::value<std::string>()->multitoken(),
+			"Matrix that transforms from the sensor color space to XYZ tristimulus values\n")
 		("scale", po::value<float>(),
-			"Optional scale factor that is applied to the image")
+			"Optional scale factor that is applied to the image\n")
+		("crop", po::value<std::string>(),
+			"Crop to a rectangular area. 'arg' should be specified in the form x,y,width,height\n")
 		("resample", po::value<std::string>(),
 			"Resample the image to a different resolution. 'arg' can be "
 			"a pair of integers like 1188x790 or the max. resolution ("
-			"maintaining the aspect ratio)")
-		("colormode", po::value<EColorMode>()->default_value(ESRGB, "sRGB"),
-			"Output color space (one of 'native'/'sRGB'/'XYZ')")
-		("sensor2xyz", po::value<std::string>()->multitoken(), 
-			"Matrix that transforms from the sensor color space to XYZ tristimulus values")
-		("demosaic", po::value<bool>()->default_value(true, "yes"),
-			"Perform demosaicing? If disabled, the raw Bayer grid is exported as a grayscale EXR file")
-		("half", po::value<bool>()->default_value(true, "yes"),
-			"To save storage, hdrmerge writes half precision files by "
-			"default (set to 'no' for single precision)");
+			"maintaining the aspect ratio)\n")
+		("wbalpatch", po::value<std::string>(),
+		    "White balance the image using a grey patch occupying the region "
+			"'arg' (specified as x,y,width,height). Prints output suitable for --wbal\n")
+		("wbal", po::value<std::string>(),
+		    "White balance the image using floating point multipliers 'arg' "
+			"specified as r,g,b\n")
+		("rfilter", po::value<std::string>()->default_value("lanczos"),
+			"Resampling filter used by the --resample option (available choices: "
+			"'tent' or 'lanczos')\n")
+		("single", "Write EXR files in single precision instead of half precision?\n")
+		("output", po::value<std::string>()->default_value("output.exr"),
+			"Name of the output file in OpenEXR format");
 
 	hidden_options.add_options()
 		("input-files", po::value<std::vector<std::string>>(), "Input files");
@@ -125,6 +185,51 @@ int main(int argc, char **argv) {
 		return -1;
 	}
 
+	std::vector<int> wbalpatch;
+	if (vm.count("wbalpatch")) {
+		std::string argument = vm["wbalpatch"].as<std::string>();
+		boost::char_separator<char> sep(", ");
+		boost::tokenizer<boost::char_separator<char>> tokens(argument, sep);
+
+		try {
+			for (auto it = tokens.begin(); it != tokens.end(); ++it)
+				wbalpatch.push_back(boost::lexical_cast<int>(*it));
+		} catch (const boost::bad_lexical_cast &) {
+			cerr << "Unable to parse the 'wbalpatch' argument!" << endl;
+			return -1;
+		}
+
+		if (wbalpatch.size() != 4) {
+			cerr << "Unable to parse the 'wbalpatch' argument (expected 4 numbers)!" << endl;
+			return -1;
+		}
+	}
+
+	std::vector<float> wbal;
+	if (vm.count("wbal")) {
+		std::string argument = vm["wbal"].as<std::string>();
+		boost::char_separator<char> sep(", ");
+		boost::tokenizer<boost::char_separator<char>> tokens(argument, sep);
+
+		try {
+			for (auto it = tokens.begin(); it != tokens.end(); ++it)
+				wbal.push_back(boost::lexical_cast<float>(*it));
+		} catch (const boost::bad_lexical_cast &) {
+			cerr << "Unable to parse the 'wbal' argument!" << endl;
+			return -1;
+		}
+
+		if (wbal.size() != 3) {
+			cerr << "Unable to parse the 'wbal' argument (expected 3 numbers)!" << endl;
+			return -1;
+		}
+	}
+
+	if (!wbal.empty() && !wbalpatch.empty()) {
+		cerr << "Cannot specify --wbal and --wbalpatch at the same time!" << endl;
+		return -1;
+	}
+
 	std::vector<int> resample;
 	if (vm.count("resample")) {
 		std::string argument = vm["resample"].as<std::string>();
@@ -133,14 +238,34 @@ int main(int argc, char **argv) {
 
 		try {
 			for (auto it = tokens.begin(); it != tokens.end(); ++it)
-				resample.push_back(boost::lexical_cast<float>(*it));
+				resample.push_back(boost::lexical_cast<int>(*it));
 		} catch (const boost::bad_lexical_cast &) {
 			cerr << "Unable to parse the 'resample' argument!" << endl;
 			return -1;
 		}
 
 		if (resample.size() != 1 && resample.size() != 2) {
-			cerr << "Unable to parse the 'resample' argument!" << endl;
+			cerr << "Unable to parse the 'resample' argument (expected 1 or 2 numbers)!" << endl;
+			return -1;
+		}
+	}
+
+	std::vector<int> crop;
+	if (vm.count("crop")) {
+		std::string argument = vm["crop"].as<std::string>();
+		boost::char_separator<char> sep(", ");
+		boost::tokenizer<boost::char_separator<char>> tokens(argument, sep);
+
+		try {
+			for (auto it = tokens.begin(); it != tokens.end(); ++it)
+				crop.push_back(boost::lexical_cast<int>(*it));
+		} catch (const boost::bad_lexical_cast &) {
+			cerr << "Unable to parse the 'crop' argument!" << endl;
+			return -1;
+		}
+
+		if (crop.size() != 4) {
+			cerr << "Unable to parse the 'crop' argument (expected 4 numbers)!" << endl;
 			return -1;
 		}
 	}
@@ -225,13 +350,26 @@ int main(int argc, char **argv) {
 			}
 		}
 
-		/// Step 4b: Scale
+		/// Step 5: White balancing
+		if (!wbal.empty()) {
+			float scale[3] = { wbal[0], wbal[1], wbal[2] };
+			es.whitebalance(scale);
+		} else if (wbalpatch.size()) {
+			es.whitebalance(wbalpatch[0], wbalpatch[1], wbalpatch[2], wbalpatch[3]);
+		}
+
+		/// Step 6: Scale
 		if (scale != 1.0f)
 			es.scale(scale);
 
-		/// Step 5: Remove vignetting
-		/// Step 6: Crop
-		/// Step 7: Resample
+
+		/// Step 7: Remove vignetting
+
+		/// Step 8: Crop
+		if (!crop.empty())
+			es.crop(crop[0], crop[1], crop[2], crop[3]);
+
+		/// Step 9: Resample
 		if (!resample.empty()) {
 			int w, h;
 
@@ -244,21 +382,30 @@ int main(int argc, char **argv) {
 				h = resample[1];
 			}
 
-			if (demosaic)
-				es.resample(w, h);
-			else
+			if (demosaic) {
+				std::string rfilter = boost::to_lower_copy(vm["rfilter"].as<std::string>());
+				if (rfilter == "lanczos") {
+					es.resample(LanczosSincFilter(), w, h);
+				} else if (rfilter == "tent") {
+					es.resample(TentFilter(), w, h);
+				} else {
+					cout << "Invalid resampling filter chosen (must be 'lanczos' / 'tent')" << endl;
+					return -1;
+				}
+			} else {
 				cout << "Warning: resampling a non-demosaiced image does not make much sense -- ignoring." << endl;
+			}
 		}
 
-		// Step 8: Write output
+		// Step 10: Write output
 		std::string output = vm["output"].as<std::string>();
-		bool half = vm["half"].as<bool>();
+		bool half = vm.count("single") == 0;
 
 		if (demosaic) {
-			writeOpenEXR(output, es.width, es.height, 3, 
+			writeOpenEXR(output, es.width, es.height, 3,
 				(float *) es.image_demosaiced, es.metadata, half);
 		} else {
-			writeOpenEXR(output, es.width, es.height, 1, 
+			writeOpenEXR(output, es.width, es.height, 1,
 				(float *) es.image_merged, es.metadata, half);
 		}
 	} catch (const std::exception &ex) {

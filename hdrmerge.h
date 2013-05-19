@@ -14,9 +14,20 @@ using std::cout;
 using std::cerr;
 using std::endl;
 
+/// String map for metadata
 typedef std::map<std::string, std::string> StringMap;
+
+/// Rgb color type
 typedef float float3[3];
 
+/// Abstract reconstruction filter
+class ReconstructionFilter {
+public:
+	virtual float getRadius() const = 0;
+	virtual float eval(float x) const = 0;
+};
+
+/// Records a single RAW exposure
 struct Exposure {
 	std::string filename;
 	float exposure;
@@ -48,6 +59,7 @@ struct Exposure {
 	}
 };
 
+/// Stores a series of exposures, manages demosaicing and subsequent steps
 struct ExposureSeries {
 	std::vector<Exposure> exposures;
 	StringMap metadata;
@@ -60,7 +72,7 @@ struct ExposureSeries {
 
 	/* Merged high dynamic range image (no demosaicing yet) */
 	float *image_merged;
-	
+
 	/* Merged and demosaiced image */
 	float3 *image_demosaiced;
 
@@ -119,7 +131,16 @@ struct ExposureSeries {
 	void scale(float factor);
 
 	/// Resample the image to a different resolution
-	void resample(size_t w, size_t h);
+	void resample(const ReconstructionFilter &filter, size_t w, size_t h);
+
+	/// Crop a rectangular region
+	void crop(int x, int y, int w, int h);
+
+	/// Apply white balancing
+	void whitebalance(float *scale);
+
+	/// Apply white balancing based on a grey patch
+	void whitebalance(int xoffs, int yoffs, int w, int h);
 
 	/// Return the number of exposures
 	inline size_t size() const {
@@ -137,10 +158,9 @@ extern int getProcessorCount();
 extern void writeOpenEXR(const std::string &filename, size_t w, size_t h,
 	int channels, float *data, const StringMap &metadata, bool writeHalf);
 
-#define RS_SCALE (1.0f / (1.0f + RAND_MAX))
-
 /// Generate a uniformly distributed random number in [0, 1)
 inline float randf() {
+	#define RS_SCALE (1.0f / (1.0f + RAND_MAX))
     float f;
     do {
        f = (((rand () * RS_SCALE) + rand ()) * RS_SCALE + rand()) * RS_SCALE;
