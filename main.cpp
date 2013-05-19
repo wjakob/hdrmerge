@@ -2,6 +2,7 @@
 #include <boost/lexical_cast.hpp>
 #include <boost/tokenizer.hpp>
 #include <boost/algorithm/string.hpp>
+#include <boost/format.hpp>
 #include <fstream>
 #include "hdrmerge.h"
 
@@ -71,6 +72,44 @@ private:
 	float m_radius;
 };
 
+template <typename T> std::vector<T> parse_list(const po::variables_map &vm, 
+		const std::string &name, const std::vector<size_t> &nargs, 
+		const char *sepstr = " ,") {
+	std::vector<T> result;
+
+	if (!vm.count(name))
+		return result;
+
+	std::string argument = vm[name].as<std::string>();
+	boost::char_separator<char> sep(sepstr);
+	boost::tokenizer<boost::char_separator<char>> tokens(argument, sep);
+
+	try {
+		for (auto it = tokens.begin(); it != tokens.end(); ++it)
+			result.push_back(boost::lexical_cast<T>(*it));
+	} catch (const boost::bad_lexical_cast &) {
+		throw std::runtime_error((boost::format("Unable to parse the '%1%' argument!") % name).str());
+	}
+
+	bool good = false;
+	std::ostringstream oss;
+	for (size_t i=0; i<nargs.size(); ++i) {
+		if (result.size() == nargs[i]) {
+			good = true;
+			break;
+		}
+		oss << nargs[i];
+		if (i+1 < nargs.size())
+			oss << " or ";
+	}
+
+	if (!good)
+		throw std::runtime_error((boost::format("Unable to parse the '%1%'"
+			" argument -- expected %2% values!") % name % oss.str()).str());
+
+	return result;
+}
+
 void help(char **argv, const po::options_description &desc) {
 	cout << "RAW to HDR merging tool, written by Wenzel Jakob <wenzel@cs.cornell.edu>" << endl
 		<< "Version 1.0 (May 2013). Source @ https://github.com/wjakob/hdrmerge" << endl
@@ -107,7 +146,15 @@ void help(char **argv, const po::options_description &desc) {
 		<< "Step 2: Merge" << endl
 		<< "  TBD" << endl
 		<< endl
-		<< "Step 7: Resample" << endl
+		<< "Step 7: Vignetting correction" << endl
+		<< "  To remove vignetting from your photographs, take a single well-exposed " << endl
+		<< "  picture of a uniformly colored object. Ideally, take a picture through " << endl
+		<< "  the opening of an integrating sphere, if you have one. Then run hdrmerge" << endl
+		<< "  on this picture using the --vcal parameter. This fits a radial polynomial" << endl
+		<< "  of the form 1 + ax^2 + bx^4 + cx^6 to the image and prints out the" << endl
+		<< "  coefficients. These can then be passed using the --vcorr parameter" << endl
+		<< endl
+		<< "Step 9: Resample" << endl
 		<< "  This program can do high quality Lanczos resampling to get lower resolution" << endl
 		<< "  output if desired. This can sometimes cause ringing on high frequency edges," << endl
 		<< "  in which case a Tent filter may be preferable (selectable via --rfilter)." << endl
@@ -132,11 +179,10 @@ int main(int argc, char **argv) {
 
 	options.add_options()
 		("help", "Print information on how to use this program\n")
-		("demosaic", po::value<bool>()->default_value(true, "yes"),
-			"Perform demosaicing? If disabled, the raw Bayer grid is exported as a grayscale EXR file\n")
+		("nodemosaic", "If specified, the raw Bayer grid is exported as a grayscale EXR file\n")
 		("colormode", po::value<EColorMode>()->default_value(ESRGB, "sRGB"),
 			"Output color space (one of 'native'/'sRGB'/'XYZ')\n")
-		("sensor2xyz", po::value<std::string>()->multitoken(),
+		("sensor2xyz", po::value<std::string>(),
 			"Matrix that transforms from the sensor color space to XYZ tristimulus values\n")
 		("scale", po::value<float>(),
 			"Optional scale factor that is applied to the image\n")
@@ -146,15 +192,18 @@ int main(int argc, char **argv) {
 			"Resample the image to a different resolution. 'arg' can be "
 			"a pair of integers like 1188x790 or the max. resolution ("
 			"maintaining the aspect ratio)\n")
+		("rfilter", po::value<std::string>()->default_value("lanczos"),
+			"Resampling filter used by the --resample option (available choices: "
+			"'tent' or 'lanczos')\n")
 		("wbalpatch", po::value<std::string>(),
 		    "White balance the image using a grey patch occupying the region "
 			"'arg' (specified as x,y,width,height). Prints output suitable for --wbal\n")
 		("wbal", po::value<std::string>(),
 		    "White balance the image using floating point multipliers 'arg' "
 			"specified as r,g,b\n")
-		("rfilter", po::value<std::string>()->default_value("lanczos"),
-			"Resampling filter used by the --resample option (available choices: "
-			"'tent' or 'lanczos')\n")
+		("vcal", "Calibrate vignetting correction given a uniformly illuminated image.")
+		("vcorr", po::value<std::string>(),
+		    "Apply the vignetting correction computed using --vcal")
 		("single", "Write EXR files in single precision instead of half precision?\n")
 		("output", po::value<std::string>()->default_value("output.exr"),
 			"Name of the output file in OpenEXR format");
@@ -185,139 +234,53 @@ int main(int argc, char **argv) {
 		return -1;
 	}
 
-	std::vector<int> wbalpatch;
-	if (vm.count("wbalpatch")) {
-		std::string argument = vm["wbalpatch"].as<std::string>();
-		boost::char_separator<char> sep(", ");
-		boost::tokenizer<boost::char_separator<char>> tokens(argument, sep);
-
-		try {
-			for (auto it = tokens.begin(); it != tokens.end(); ++it)
-				wbalpatch.push_back(boost::lexical_cast<int>(*it));
-		} catch (const boost::bad_lexical_cast &) {
-			cerr << "Unable to parse the 'wbalpatch' argument!" << endl;
-			return -1;
-		}
-
-		if (wbalpatch.size() != 4) {
-			cerr << "Unable to parse the 'wbalpatch' argument (expected 4 numbers)!" << endl;
-			return -1;
-		}
-	}
-
-	std::vector<float> wbal;
-	if (vm.count("wbal")) {
-		std::string argument = vm["wbal"].as<std::string>();
-		boost::char_separator<char> sep(", ");
-		boost::tokenizer<boost::char_separator<char>> tokens(argument, sep);
-
-		try {
-			for (auto it = tokens.begin(); it != tokens.end(); ++it)
-				wbal.push_back(boost::lexical_cast<float>(*it));
-		} catch (const boost::bad_lexical_cast &) {
-			cerr << "Unable to parse the 'wbal' argument!" << endl;
-			return -1;
-		}
-
-		if (wbal.size() != 3) {
-			cerr << "Unable to parse the 'wbal' argument (expected 3 numbers)!" << endl;
-			return -1;
-		}
-	}
-
-	if (!wbal.empty() && !wbalpatch.empty()) {
-		cerr << "Cannot specify --wbal and --wbalpatch at the same time!" << endl;
-		return -1;
-	}
-
-	std::vector<int> resample;
-	if (vm.count("resample")) {
-		std::string argument = vm["resample"].as<std::string>();
-		boost::char_separator<char> sep(", x");
-		boost::tokenizer<boost::char_separator<char>> tokens(argument, sep);
-
-		try {
-			for (auto it = tokens.begin(); it != tokens.end(); ++it)
-				resample.push_back(boost::lexical_cast<int>(*it));
-		} catch (const boost::bad_lexical_cast &) {
-			cerr << "Unable to parse the 'resample' argument!" << endl;
-			return -1;
-		}
-
-		if (resample.size() != 1 && resample.size() != 2) {
-			cerr << "Unable to parse the 'resample' argument (expected 1 or 2 numbers)!" << endl;
-			return -1;
-		}
-	}
-
-	std::vector<int> crop;
-	if (vm.count("crop")) {
-		std::string argument = vm["crop"].as<std::string>();
-		boost::char_separator<char> sep(", ");
-		boost::tokenizer<boost::char_separator<char>> tokens(argument, sep);
-
-		try {
-			for (auto it = tokens.begin(); it != tokens.end(); ++it)
-				crop.push_back(boost::lexical_cast<int>(*it));
-		} catch (const boost::bad_lexical_cast &) {
-			cerr << "Unable to parse the 'crop' argument!" << endl;
-			return -1;
-		}
-
-		if (crop.size() != 4) {
-			cerr << "Unable to parse the 'crop' argument (expected 4 numbers)!" << endl;
-			return -1;
-		}
-	}
-
-	float sensor2xyz[9] = { 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-	EColorMode colormode = vm["colormode"].as<EColorMode>();
-
-	if (!vm.count("sensor2xyz") && colormode != ENative) {
-		cerr << "*******************************************************************************" << endl
-		     << "Warning: no sensor2xyz matrix was specified -- this is necessary to get proper" << endl
-			 << "sRGB / XYZ output. To acquire this matrix, convert any one of your RAW images" << endl
-			 << "into a DNG file using Adobe's DNG converter on Windows (or on Linux, using the" << endl
-			 << "'wine' emulator). The run" << endl
-			 << endl
-			 << "  $ exiv2 -pt the_image.dng 2> /dev/null | grep ColorMatrix2" << endl
-			 << "  Exif.Image.ColorMatrix2 SRational 9  <sequence of ratios>" << endl
-			 << endl
-			 << "The sequence of a rational numbers is a matrix in row-major order. Compute its" << endl
-			 << "inverse using a tool like MATLAB or Octave and add a matching entry to the" << endl
-			 << "file hdrmerge.cfg (creating it if necessary), like so:" << endl
-			 << endl
-			 << "# Sensor to XYZ color space transform (Canon EOS 50D)" << endl
-			 << "sensor2xyz=1.933062 -0.1347 0.217175 0.880916 0.725958 -0.213945 0.089893 " << endl
-			 << "-0.363462 1.579612" << endl
-			 << endl
-			 << "-> Providing output in the native sensor color space, as no matrix was given." << endl
-			 << "*******************************************************************************" << endl;
-
-		colormode = ENative;
-	} else {
-		std::string argument = vm["sensor2xyz"].as<std::string>();
-		boost::char_separator<char> sep(", ");
-		boost::tokenizer<boost::char_separator<char>> tokens(argument, sep);
-
-		try {
-			int pos = -1;
-			for (auto it = tokens.begin(); it != tokens.end(); ++it) {
-				if (++pos == 9)
-					break;
-    			sensor2xyz[pos] = boost::lexical_cast<float>(*it);
-			}
-			if (pos != 8) {
-				cerr << "'sensor2xyz' argument has the wrong number of entries!" << endl;
-				return -1;
-			}
-		} catch (const boost::bad_lexical_cast &) {
-			cerr << "Unable to parse the 'sensor2xyz' argument!" << endl;
-			return -1;
-		}
-	}
-
 	try {
+		EColorMode colormode = vm["colormode"].as<EColorMode>();
+		std::vector<int> wbalpatch      = parse_list<int>(vm, "wbalpatch", { 4 });
+		std::vector<float> wbal         = parse_list<float>(vm, "wbal", { 3 });
+		std::vector<int> resample       = parse_list<int>(vm, "resample", { 1, 2 }, ", x");
+		std::vector<int> crop           = parse_list<int>(vm, "crop", { 4 });
+		std::vector<float> sensor2xyz_v = parse_list<float>(vm, "sensor2xyz", { 9 });
+		std::vector<float> vcorr        = parse_list<float>(vm, "vcorr", { 3 });
+
+		if (!wbal.empty() && !wbalpatch.empty()) {
+			cerr << "Cannot specify --wbal and --wbalpatch at the same time!" << endl;
+			return -1;
+		}
+
+		float sensor2xyz[9] = {
+			0.412453f, 0.357580f, 0.180423f,
+			0.212671f, 0.715160f, 0.072169f,
+			0.019334f, 0.119193f, 0.950227f
+		};
+
+		if (!sensor2xyz_v.empty()) {
+			for (int i=0; i<9; ++i)
+				sensor2xyz[i] = sensor2xyz_v[i];
+		} else if (colormode != ENative) {
+			cerr << "*******************************************************************************" << endl
+				<< "Warning: no sensor2xyz matrix was specified -- this is necessary to get proper" << endl
+				<< "sRGB / XYZ output. To acquire this matrix, convert any one of your RAW images" << endl
+				<< "into a DNG file using Adobe's DNG converter on Windows (or on Linux, using the" << endl
+				<< "'wine' emulator). The run" << endl
+				<< endl
+				<< "  $ exiv2 -pt the_image.dng 2> /dev/null | grep ColorMatrix2" << endl
+				<< "  Exif.Image.ColorMatrix2 SRational 9  <sequence of ratios>" << endl
+				<< endl
+				<< "The sequence of a rational numbers is a matrix in row-major order. Compute its" << endl
+				<< "inverse using a tool like MATLAB or Octave and add a matching entry to the" << endl
+				<< "file hdrmerge.cfg (creating it if necessary), like so:" << endl
+				<< endl
+				<< "# Sensor to XYZ color space transform (Canon EOS 50D)" << endl
+				<< "sensor2xyz=1.933062 -0.1347 0.217175 0.880916 0.725958 -0.213945 0.089893 " << endl
+				<< "-0.363462 1.579612" << endl
+				<< endl
+				<< "-> Providing output in the native sensor color space, as no matrix was given." << endl
+				<< "*******************************************************************************" << endl;
+
+			colormode = ENative;
+		}
+
 		std::vector<std::string> exposures = vm["input-files"].as<std::vector<std::string>>();
 		float scale = 1.0f;
 		if (vm.count("scale"))
@@ -336,7 +299,7 @@ int main(int argc, char **argv) {
 		es.merge();
 
 		/// Step 3: Demosaicing
-		bool demosaic = vm["demosaic"].as<bool>();
+		bool demosaic = vm.count("nodemosaic") == 0;
 		if (demosaic)
 			es.demosaic(sensor2xyz);
 
@@ -362,8 +325,15 @@ int main(int argc, char **argv) {
 		if (scale != 1.0f)
 			es.scale(scale);
 
-
 		/// Step 7: Remove vignetting
+		if (vm.count("vcal")) {
+			if (vm.count("vcorr")) {
+				cerr << "Warning: only one of --vcal and --vcorr can be specified at a time. Ignoring --vcorr" << endl;
+			}
+			es.vcal();
+		} else if (!vcorr.empty()) {
+			es.vcorr(vcorr[0], vcorr[1], vcorr[2]);
+		}
 
 		/// Step 8: Crop
 		if (!crop.empty())

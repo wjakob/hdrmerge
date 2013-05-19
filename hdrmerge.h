@@ -142,6 +142,12 @@ struct ExposureSeries {
 	/// Apply white balancing based on a grey patch
 	void whitebalance(int xoffs, int yoffs, int w, int h);
 
+	/// Remove vignetting / calibration routine
+	void vcal();
+
+	/// Correct for vignetting using a radial polynomial 1+ax^2+bx^4+cx^6
+	void vcorr(float a, float b, float c);
+
 	/// Return the number of exposures
 	inline size_t size() const {
 		return exposures.size();

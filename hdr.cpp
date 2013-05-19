@@ -1,6 +1,7 @@
 #include "hdrmerge.h"
 #include <omp.h>
 #include <string.h>
+#include "Eigen/QR"
 
 float compute_weight(uint16_t value, uint16_t blacklevel, uint16_t saturation) {
 	const float alpha = -1.0f / 10.0f;
@@ -443,10 +444,13 @@ void ExposureSeries::whitebalance(int offs_x, int offs_y, int w, int h) {
 		}
 	}
 
+	for (int c=0; c<3; ++c)
+		scale[c] = 1.0f / scale[c];
+
 	float normalization = 3.0f / (scale[0] + scale[1] + scale[2]);
 
 	for (int c=0; c<3; ++c)
-		scale[c] *= normalization;
+		scale[c] = normalization * scale[c];
 
 	whitebalance(scale);
 }
@@ -463,4 +467,67 @@ void ExposureSeries::whitebalance(float *scale) {
 	}
 }
 
+void ExposureSeries::vcal() {
+	/* Simplistic vignetting correction -- assumes that vignetting is radially symmetric
+	   around the image center and least-squares-fits a 6-th order polynomial. Probably
+	   good enough for most purposes though.. */
+	double center_x = width / 2.0, center_y = height / 2.0;
+	size_t skip = 10, nPixels = ((width+skip-1)/skip) * ((height+skip-1)/skip);
+	double size_scale = 1.0 / std::max(width, height);
 
+	Eigen::MatrixXd A(nPixels, 4);
+	Eigen::VectorXd b(nPixels);
+
+	cout << "Fitting a 6-th order polynomial to the vignetting profile .." << endl;
+	size_t idx = 0;
+
+	for (size_t y=0; y<height; y += skip) {
+		float3 *ptr = image_demosaiced + y*width;
+		double dy = ((y + 0.5f) - center_y)*size_scale, dy2 = dy*dy;
+		for (size_t x=0; x<width; x += skip) {
+			double luminance = ptr[0][0] * 0.212671 + ptr[0][1] * 0.715160 + ptr[0][2] * 0.072169;
+			double dx = ((x + 0.5f) - center_x) * size_scale, dx2 = dx*dx;
+			double dist2 = dx2+dy2, dist4 = dist2*dist2, dist6 = dist4*dist2;
+			A(idx, 0) = 1.0f;
+			A(idx, 1) = dist2;
+			A(idx, 2) = dist4;
+			A(idx, 3) = dist6;
+			b(idx) = luminance;
+			ptr += skip;
+			idx++;
+		}
+	}
+	if (nPixels != idx) {
+		cout << idx << " vs " << nPixels << endl;
+		exit(-1);
+	}
+
+	Eigen::VectorXd result = A.colPivHouseholderQr().solve(b);
+	result /= result(0);
+
+	cout << "Done. Pass --vcorr \"" << result[1] << ", " << result[2] << ", " << result[3]
+		 << "\" to hdrmerge in future runs (or add to 'hdrmerge.cfg')" << endl;
+
+	vcorr((float) result[1], (float) result[2], (float) result[3]);
+}
+
+void ExposureSeries::vcorr(float a, float b, float c) {
+	double center_x = width / 2.0, center_y = height / 2.0;
+	double size_scale = 1.0 / std::max(width, height);
+
+	cout << "Correcting for vignetting .." << endl;
+
+	#pragma omp parallel for
+	for (size_t y=0; y<height; ++y) {
+		float3 *ptr = image_demosaiced + y*width;
+		double dy = ((y + 0.5f) - center_y)*size_scale, dy2 = dy*dy;
+		for (size_t x=0; x<width; ++x) {
+			double dx = ((x + 0.5f) - center_x)*size_scale, dx2 = dx*dx;
+			double dist2 = dx2+dy2, dist4 = dist2*dist2, dist6 = dist4*dist2;
+			float corr = 1.0f / (1.0f + dist2*a + dist4*b + dist6*c);
+			for (int c=0; c<3; ++c)
+				ptr[0][c] *= corr;
+			++ptr;
+		}
+	}
+}
