@@ -330,9 +330,15 @@ int main(int argc, char **argv) {
 			if (vm.count("vcorr")) {
 				cerr << "Warning: only one of --vcal and --vcorr can be specified at a time. Ignoring --vcorr" << endl;
 			}
-			es.vcal();
+			if (demosaic)
+				es.vcal();
+			else
+				cerr << "Warning: Vignetting correction requires demosaicing. Ignoring.." << endl;
 		} else if (!vcorr.empty()) {
-			es.vcorr(vcorr[0], vcorr[1], vcorr[2]);
+			if (demosaic)
+				es.vcorr(vcorr[0], vcorr[1], vcorr[2]);
+			else
+				cerr << "Warning: Vignetting correction requires demosaicing. Ignoring.." << endl;
 		}
 
 		/// Step 8: Crop
