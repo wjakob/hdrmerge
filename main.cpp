@@ -201,9 +201,9 @@ int main(int argc, char **argv) {
 		("wbal", po::value<std::string>(),
 		    "White balance the image using floating point multipliers 'arg' "
 			"specified as r,g,b\n")
-		("vcal", "Calibrate vignetting correction given a uniformly illuminated image.")
+		("vcal", "Calibrate vignetting correction given a uniformly illuminated image\n")
 		("vcorr", po::value<std::string>(),
-		    "Apply the vignetting correction computed using --vcal")
+		    "Apply the vignetting correction computed using --vcal\n")
 		("single", "Write EXR files in single precision instead of half precision?\n")
 		("output", po::value<std::string>()->default_value("output.exr"),
 			"Name of the output file in OpenEXR format");
