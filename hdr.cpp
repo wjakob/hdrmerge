@@ -207,3 +207,35 @@ void ExposureSeries::demosaic(float *colormatrix) {
 
 	delete[] buffers;
 }
+
+
+void ExposureSeries::whiteBalance(int xoffs, int yoffs, int w, int h) {
+	float scale[3] = { 0, 0, 0 };
+	for (int y=0; y<h; ++y) {
+		float3 *ptr = image_demosaiced + (yoffs+y) * width + xoffs;
+		for (int x=0; x<w; ++x) {
+			for (int c=0; c<3; ++c)
+				scale[c] += (*ptr)[c];
+			++ptr;
+		}
+	}
+
+	float normalization = 3.0f / (scale[0] + scale[1] + scale[3]);
+
+	for (int c=0; c<3; ++c)
+		scale[c] *= normalization;
+
+	whiteBalance(scale);
+}
+
+void ExposureSeries::whiteBalance(float *scale) {
+	cout << "Applying white balance (" << scale[0] << ", " << scale[1] << ", " << scale[2] << ")" << endl;
+	for (size_t y=0; y<height; ++y) {
+		float3 *ptr = image_demosaiced + y*width;
+		for (size_t x=0; x<width; ++x) {
+			for (int c=0; c<3; ++c)
+				(*ptr)[c] *= scale[c];
+			ptr++;
+		}
+	}
+}
