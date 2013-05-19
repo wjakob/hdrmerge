@@ -241,18 +241,8 @@ void ExposureSeries::load() {
 	cout << " done (" << width << "x" << height << ", using "
 		 << (width*height*sizeof(uint16_t) * exposures.size()) / (float) (1024*1024)
 		 << " MiB of memory)" << endl;
+}
 
-	if (saturation == 0 && size() > 1) {
-		/* Determine the value of a pixel considered to be overexposured */
-		size_t npix = width*height;
-		uint16_t *temp = new uint16_t[npix];
-		memcpy(temp, exposures[size()-1].image, npix*sizeof(uint16_t));
-		size_t percentile = (size_t) (npix*0.999);
-		std::nth_element(temp, temp+percentile, temp+npix);
-		saturation = *(temp+percentile);
-		delete[] temp;
-
-		cout << "Saturation determined to be around "
-			<< (saturation-blacklevel) / (float) (whitepoint-blacklevel) * 100 << "\% of the dynamic range." << endl;
-	}
+int rawspeed_get_number_of_processor_cores() {
+	return getProcessorCount();
 }

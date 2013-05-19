@@ -15,13 +15,41 @@ float compute_weight(uint16_t value, uint16_t blacklevel, uint16_t saturation) {
 	return beta * std::exp(alpha * (1/scaled + 1/(1-scaled)));
 }
 
-void ExposureSeries::merge() {
+void ExposureSeries::merge(float saturation) {
 	image_merged = new float[width * height];
+
+	if (saturation == 0) {
+		/* Determine the value of a pixel considered to be overexposured */
+		size_t npix = width*height;
+		uint16_t *temp = new uint16_t[npix];
+		memcpy(temp, exposures[size()-1].image, npix*sizeof(uint16_t));
+		size_t percentile = (size_t) (npix*0.999);
+		std::nth_element(temp, temp+percentile, temp+npix);
+		saturation = *(temp+percentile);
+		delete[] temp;
+
+		saturation = (saturation-blacklevel) / (float) (whitepoint-blacklevel);
+
+		cerr << endl
+			 << "*******************************************************************************" << endl
+			 << "Warning: The HDR merging step needs to know the sensor's saturation threshold." << endl
+			 << "This is the percentage of the sensor's theoretical dynamic range, at which" << endl
+			 << "saturation occurs in practice. Based on the brightest image region in your " << endl
+			 << "longest exposure, this was estimated to be around " << saturation*100 << "\% (for Canon cameras," << endl
+			 << "this number is usually around 80\%). This estimatimation of course only" << endl
+			 << "works if your longest exposure does indeed contain overexposed pixels..." << endl
+			 << endl
+			 << "If you are going to process a larger set of measurements, it is advisable to" << endl
+			 << "lock this parameter by creating a line \"saturation=" << saturation<< "\" in hdrmerge.cfg" << endl
+			 << "*******************************************************************************" << endl
+			 << endl;
+	}
 
 	/* Precompute some tables for weights and normalized pixel values */
 	float weight_tbl[0xFFFF], value_tbl[0xFFFF];
 	for (int i=0; i<0xFFFF; ++i) {
-		weight_tbl[i] = compute_weight((uint16_t) i, blacklevel, saturation);
+		weight_tbl[i] = compute_weight((uint16_t) i, blacklevel, 
+			saturation * (whitepoint-blacklevel) + blacklevel);
 		value_tbl[i] = (float) (i - blacklevel) / (float) (whitepoint - blacklevel);
 	}
 

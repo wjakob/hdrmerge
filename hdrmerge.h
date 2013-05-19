@@ -67,8 +67,8 @@ struct ExposureSeries {
 	/* Width and height of the cropped RAW images */
 	size_t width, height;
 
-	/* Black level, saturation value and whitepoint (max theoretical range) */
-	int blacklevel, saturation, whitepoint;
+	/* Black level and whitepoint as determined by RawSpeed */
+	int blacklevel, whitepoint;
 
 	/* Merged high dynamic range image (no demosaicing yet) */
 	float *image_merged;
@@ -79,7 +79,7 @@ struct ExposureSeries {
 	/* dcraw-style color filter array description */
 	int filter;
 
-	inline ExposureSeries() : saturation(0),
+	inline ExposureSeries() : 
 		image_merged(NULL), image_demosaiced(NULL) { }
 
 	~ExposureSeries() {
@@ -119,7 +119,7 @@ struct ExposureSeries {
 	void load();
 
 	/// Merge all exposures into a single HDR image and release the RAW data
-	void merge();
+	void merge(float saturation);
 
 	/// Perform demosaicing
 	void demosaic(float *sensor2xyz);

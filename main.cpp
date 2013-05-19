@@ -4,6 +4,7 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/format.hpp>
 #include <fstream>
+#include <unistd.h>
 #include "hdrmerge.h"
 
 namespace po = boost::program_options;
@@ -110,6 +111,10 @@ template <typename T> std::vector<T> parse_list(const po::variables_map &vm,
 	return result;
 }
 
+int getProcessorCount() {
+	return sysconf(_SC_NPROCESSORS_CONF);
+}
+
 void help(char **argv, const po::options_description &desc) {
 	cout << "RAW to HDR merging tool, written by Wenzel Jakob <wenzel@cs.cornell.edu>" << endl
 		<< "Version 1.0 (May 2013). Source @ https://github.com/wjakob/hdrmerge" << endl
@@ -131,7 +136,7 @@ void help(char **argv, const po::options_description &desc) {
 		<< "  The order of operations is as follows (all steps except 1 and 10 are optional" << endl
 		<< "  brackets indicate ones that disabled by default):" << endl << endl
 		<< "    1. Load RAWs -> 2. HDR Merge -> 3. Demosaic -> 4. Transform colors -> " << endl
-		<< "    5. [Whitebalance] -> 6. [Scale] -> 7. [Remove vignetting] -> 8. [Crop] -> " << endl
+		<< "    5. [White balance] -> 6. [Scale] -> 7. [Remove vignetting] -> 8. [Crop] -> " << endl
 		<< "    9. [Resample] -> 8. Write OpenEXR" << endl
 		<< endl
 		<< "The following sections contain additional information on some of these steps." << endl
@@ -144,7 +149,16 @@ void help(char **argv, const po::options_description &desc) {
 		<< "  'rawspeed/update_rawspeed.sh' shell script and recompile." << endl
 		<< endl
 		<< "Step 2: Merge" << endl
-		<< "  TBD" << endl
+		<< "  Exposures are merged based on a simple Poisson noise model. In other words," << endl
+		<< "  the exposures are simply summed together and divided by the total exposure." << endl
+		<< "  time. To avoid problems with over- and under-exposure, each pixel is" << endl
+		<< "  furthermore weighted such that only well-exposed pixels contribute to this" << endl
+		<< "  summation." << endl
+		<< endl
+		<< "Step 3: Demosaic" << endl
+		<< "  This program uses Adaptive Homogeneity-Directed demosaicing (AHD) to" << endl
+		<< "  interpolate colors over the image. Importantly, demosaicing is done *after*" << endl
+		<< "  HDR merging, on the resulting floating point-valued Bayer grid." << endl
 		<< endl
 		<< "Step 7: Vignetting correction" << endl
 		<< "  To remove vignetting from your photographs, take a single well-exposed " << endl
@@ -179,6 +193,9 @@ int main(int argc, char **argv) {
 
 	options.add_options()
 		("help", "Print information on how to use this program\n")
+		("saturation", po::value<float>(),
+		    "Saturation threshold of the sensor: the ratio of the sensor's theoretical dynamic "
+			"range, at which saturation occurs in practice (in [0,1]). Estimated automatically if not specified.\n")
 		("nodemosaic", "If specified, the raw Bayer grid is exported as a grayscale EXR file\n")
 		("colormode", po::value<EColorMode>()->default_value(ESRGB, "sRGB"),
 			"Output color space (one of 'native'/'sRGB'/'XYZ')\n")
@@ -259,24 +276,25 @@ int main(int argc, char **argv) {
 				sensor2xyz[i] = sensor2xyz_v[i];
 		} else if (colormode != ENative) {
 			cerr << "*******************************************************************************" << endl
-				<< "Warning: no sensor2xyz matrix was specified -- this is necessary to get proper" << endl
-				<< "sRGB / XYZ output. To acquire this matrix, convert any one of your RAW images" << endl
-				<< "into a DNG file using Adobe's DNG converter on Windows (or on Linux, using the" << endl
-				<< "'wine' emulator). The run" << endl
-				<< endl
-				<< "  $ exiv2 -pt the_image.dng 2> /dev/null | grep ColorMatrix2" << endl
-				<< "  Exif.Image.ColorMatrix2 SRational 9  <sequence of ratios>" << endl
-				<< endl
-				<< "The sequence of a rational numbers is a matrix in row-major order. Compute its" << endl
-				<< "inverse using a tool like MATLAB or Octave and add a matching entry to the" << endl
-				<< "file hdrmerge.cfg (creating it if necessary), like so:" << endl
-				<< endl
-				<< "# Sensor to XYZ color space transform (Canon EOS 50D)" << endl
-				<< "sensor2xyz=1.933062 -0.1347 0.217175 0.880916 0.725958 -0.213945 0.089893 " << endl
-				<< "-0.363462 1.579612" << endl
-				<< endl
-				<< "-> Providing output in the native sensor color space, as no matrix was given." << endl
-				<< "*******************************************************************************" << endl;
+				 << "Warning: no sensor2xyz matrix was specified -- this is necessary to get proper" << endl
+				 << "sRGB / XYZ output. To acquire this matrix, convert any one of your RAW images" << endl
+				 << "into a DNG file using Adobe's DNG converter on Windows / Mac (or on Linux," << endl
+				 << "using the 'wine' emulator). The run" << endl
+				 << endl
+				 << "  $ exiv2 -pt the_image.dng 2> /dev/null | grep ColorMatrix2" << endl
+				 << "  Exif.Image.ColorMatrix2 SRational 9  <sequence of ratios>" << endl
+				 << endl
+				 << "The sequence of a rational numbers is a matrix in row-major order. Compute its" << endl
+				 << "inverse using a tool like MATLAB or Octave and add a matching entry to the" << endl
+				 << "file hdrmerge.cfg (creating it if necessary), like so:" << endl
+				 << endl
+				 << "# Sensor to XYZ color space transform (Canon EOS 50D)" << endl
+				 << "sensor2xyz=1.933062 -0.1347 0.217175 0.880916 0.725958 -0.213945 0.089893 " << endl
+				 << "-0.363462 1.579612" << endl
+				 << endl
+				 << "-> Providing output in the native sensor color space, as no matrix was given." << endl
+				 << "*******************************************************************************" << endl
+				 << endl;
 
 			colormode = ENative;
 		}
@@ -295,8 +313,12 @@ int main(int argc, char **argv) {
 			throw std::runtime_error("No input found / list of exposures to merge is empty!");
 		es.load();
 
+		float saturation = 0;
+		if (vm.count("saturation"))
+			saturation = vm["saturation"].as<float>();
+
 		/// Step 2: HDR merge
-		es.merge();
+		es.merge(saturation);
 
 		/// Step 3: Demosaicing
 		bool demosaic = vm.count("nodemosaic") == 0;

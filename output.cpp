@@ -1,9 +1,7 @@
 #include "hdrmerge.h"
 #include <ImfOutputFile.h>
-#include <ImfInputFile.h>
 #include <ImfChannelList.h>
 #include <ImfStringAttribute.h>
-#include <unistd.h>
 
 void writeOpenEXR(const std::string &filename, size_t w, size_t h, int nChannels, float *data, const StringMap &metadata, bool writeHalf) {
 	Imf::setGlobalThreadCount(getProcessorCount());
@@ -14,7 +12,8 @@ void writeOpenEXR(const std::string &filename, size_t w, size_t h, int nChannels
 
 	Imf::ChannelList &channels = header.channels();
 
-	cout << "Writing " << filename << " (" << w << "x" << h << ", " << nChannels << " channels) .. " << endl;
+	cout << "Writing " << filename << " (" << w << "x" << h << ", " << nChannels
+		 << " channels, " << (writeHalf ? "half" : "single") << " precision) .. " << endl;
 	if (nChannels == 3) {
 		if (writeHalf) {
 			channels.insert("R", Imf::Channel(Imf::HALF));
@@ -80,10 +79,3 @@ void writeOpenEXR(const std::string &filename, size_t w, size_t h, int nChannels
 	}
 }
 
-int getProcessorCount() {
-	return sysconf(_SC_NPROCESSORS_CONF);
-}
-
-int rawspeed_get_number_of_processor_cores() {
-	return getProcessorCount();
-}
