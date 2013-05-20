@@ -5,8 +5,19 @@ of producing RAW output. It does not do any fancy noicy removal or other types
 of postprocessing and instead tries to be simple, understandable and hackable.
 
 ### Compiling:
-You will need a recent C++ compiler with support for C++11. g++4.8 works, others
-have not been tested yet.
+You will need a recent C++ compiler with support for C++11 and OpenMP. Only g++4.8
+has been tested so far. This program depends on: libxml2 (for RawSpeed), libjpeg,
+OpenEXR, libexiv2 and Boost.
+
+Run
+
+    cmake .
+    
+followed by
+
+    make
+    
+to start the compilation.
 
 ### Usage
     Syntax: ./hdrmerge [options] <RAW file format string / list of multiple files>
