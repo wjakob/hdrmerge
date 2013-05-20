@@ -157,7 +157,7 @@ void ExposureSeries::check() {
 	else
 		cout << "f/" << aperture;
 
-	cout << ", exposures: ";
+	cout << ", exposures times: ";
 	for (size_t i=0; i<exposures.size(); ++i) {
 		cout << exposures[i].toString();
 		if (i+1 < exposures.size())
@@ -171,8 +171,8 @@ void ExposureSeries::check() {
 			return a.exposure == b.exposure;
 	});
 
-//	if (it != exposures.end())
-//		throw std::runtime_error((boost::format("Duplicate exposure time: %1%") % it->toString()).str());
+	if (it != exposures.end())
+		throw std::runtime_error((boost::format("Duplicate exposure time: %1%") % it->toString()).str());
 
 	cout << "Collected " << metadata.size() << " metadata entries." << endl;
 }

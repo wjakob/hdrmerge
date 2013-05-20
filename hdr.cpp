@@ -3,7 +3,7 @@
 #include <string.h>
 #include "Eigen/QR"
 
-float compute_weight(uint16_t value, uint16_t blacklevel, uint16_t saturation) {
+float compute_weight(uint16_t value, uint16_t blacklevel, float saturation) {
 	const float alpha = -1.0f / 10.0f;
 	const float beta = 1.0f / std::exp(4.0f*alpha);
 
@@ -15,8 +15,15 @@ float compute_weight(uint16_t value, uint16_t blacklevel, uint16_t saturation) {
 	return beta * std::exp(alpha * (1/scaled + 1/(1-scaled)));
 }
 
-void ExposureSeries::merge(float saturation) {
-	image_merged = new float[width * height];
+void ExposureSeries::initTables(float saturation) {
+	this->saturation = saturation;
+
+	/* Compute relative exposure table */
+	for (int i=0; i<0xFFFF; ++i)
+		value_tbl[i] = (float) (i - blacklevel) / (float) (whitepoint - blacklevel);
+
+	if (size() == 1) /* Only one exposure -- weights not needed */
+		return;
 
 	if (saturation == 0) {
 		/* Determine the value of a pixel considered to be overexposured */
@@ -28,33 +35,37 @@ void ExposureSeries::merge(float saturation) {
 		saturation = *(temp+percentile);
 		delete[] temp;
 
-		saturation = (saturation-blacklevel) / (float) (whitepoint-blacklevel);
+		float saturation_frac = saturation = (saturation-blacklevel) / (float) (whitepoint-blacklevel);
 
 		cerr << endl
 			 << "*******************************************************************************" << endl
 			 << "Warning: The HDR merging step needs to know the sensor's saturation threshold." << endl
 			 << "This is the percentage of the sensor's theoretical dynamic range, at which" << endl
 			 << "saturation occurs in practice. Based on the brightest image region in your " << endl
-			 << "longest exposure, this was estimated to be around " << saturation*100 << "\% (for Canon cameras," << endl
+			 << "longest exposure, this was estimated to be around " << saturation_frac*100 << "\% (for Canon cameras," << endl
 			 << "this number is usually around 80\%). This estimatimation of course only" << endl
 			 << "works if your longest exposure does indeed contain overexposed pixels..." << endl
 			 << endl
 			 << "If you are going to process a larger set of measurements, it is advisable to" << endl
-			 << "lock this parameter by creating a line \"saturation=" << saturation<< "\" in hdrmerge.cfg" << endl
+			 << "lock this parameter by creating a line \"saturation=" << saturation_frac << "\" in hdrmerge.cfg" << endl
 			 << "*******************************************************************************" << endl
 			 << endl;
+	} else {
+		saturation = saturation * (whitepoint-blacklevel) + blacklevel;
 	}
+		
+	/* Precompute weight table */
+	for (int i=0; i<0xFFFF; ++i)
+		weight_tbl[i] = compute_weight((uint16_t) i, blacklevel, saturation);
+}
 
-	/* Precompute some tables for weights and normalized pixel values */
-	float weight_tbl[0xFFFF], value_tbl[0xFFFF];
-	for (int i=0; i<0xFFFF; ++i) {
-		weight_tbl[i] = compute_weight((uint16_t) i, blacklevel, 
-			saturation * (whitepoint-blacklevel) + blacklevel);
-		value_tbl[i] = (float) (i - blacklevel) / (float) (whitepoint - blacklevel);
-	}
+void ExposureSeries::merge() {
+	image_merged = new float[width * height];
 
 	/* Fast path (only one exposure) */
 	if (size() == 1) {
+		cout << "Only one exposure was specified -- not doing HDR merging." << endl;
+
 		#pragma omp parallel for
 		for (size_t y=0; y<height; ++y) {
 			uint16_t *src = exposures[0].image + y * width;
@@ -70,47 +81,42 @@ void ExposureSeries::merge(float saturation) {
 	#pragma omp parallel for
 	for (size_t y=0; y<height; ++y) {
 		uint32_t offset = y * width;
-		//offset = 11002202;
 		for (size_t x=0; x<width; ++x) {
 			float value = 0, total_exposure = 0;
 
-			//cout << "Offset=" << offset << endl;
+			/* Pass 1: Compute pixel intensity based on a simple 
+			   Poisson model of arriving photons. Use weighting
+			   to discard over/under-exposed pixels */
 			for (size_t img=0; img<size(); ++img) {
 				uint16_t pxvalue = exposures[img].image[offset];
 				float weight = weight_tbl[pxvalue];
 				value += value_tbl[pxvalue] * weight;
 				total_exposure += exposures[img].exposure * weight;
-
-			//	cout << img << ": " << pxvalue << " => weight=" << weight << ", value=" << value << endl;
 			}
-
 			if (total_exposure > 0)
 				value /= total_exposure;
 
-			//cout << " ====>> reference = " << value << endl;
 			float reference = value;
 			value = total_exposure = 0;
 
+			/* To reduce bias, the above estimation is carried out once
+			   more -- but this times, the weight values are computed
+			   using intensities predicted by the first estimate */
 			float blacklevel = this->blacklevel, scale = this->whitepoint - blacklevel;
-
 			for (size_t img=0; img<size(); ++img) {
 				float predicted = reference * exposures[img].exposure * scale + blacklevel;
+				uint16_t pxvalue = exposures[img].image[offset];
+
 				if (predicted <= 0 || predicted >= 65535.0f)
 					continue;
-				uint16_t predicted_pxvalue = (uint16_t) (predicted + 0.5f);
-				uint16_t pxvalue = exposures[img].image[offset];
-				float weight = weight_tbl[predicted_pxvalue];
 
+				float weight = weight_tbl[(uint16_t) (predicted + 0.5f)];
 				value += value_tbl[pxvalue] * weight;
 				total_exposure += exposures[img].exposure * weight;
-///				cout << img << ": " << value_tbl[pxvalue] << " (pred=" << reference * exposures[img].exposure << ")  => weight=" << weight << ", value=" << value << endl;
-//				cout << pxvalue << ", " << predicted_pxvalue << ", " << exposures[img].exposure << "; ";
 			}
-			//cout << endl;
 
 			if (total_exposure > 0)
 				value /= total_exposure;
-//			cout << " ====>> reference = " << value << endl;
 
 			image_merged[offset++] = value;
 		}
@@ -118,7 +124,6 @@ void ExposureSeries::merge(float saturation) {
 	for (size_t i=0; i<exposures.size(); ++i)
 		exposures[i].release();
 }
-
 
 void ExposureSeries::demosaic(float *sensor2xyz) {
 	/* This function is based on the AHD code from dcraw, which in turn

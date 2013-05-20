@@ -79,6 +79,12 @@ struct ExposureSeries {
 	/* dcraw-style color filter array description */
 	int filter;
 
+	/* Saturation threshold */
+	float saturation;
+
+	/* Tables for transforming from sensor values to exposures / weights */
+	float weight_tbl[0xFFFF], value_tbl[0xFFFF];
+
 	inline ExposureSeries() : 
 		image_merged(NULL), image_demosaiced(NULL) { }
 
@@ -90,7 +96,7 @@ struct ExposureSeries {
 	}
 
 	/// Return the color at position (x, y)
-	inline int fc(int x, int y) {
+	inline int fc(int x, int y) const {
 		return (filter >> (((y << 1 & 14) + (x & 1)) << 1) & 3);
 	}
 
@@ -118,8 +124,14 @@ struct ExposureSeries {
 	 */
 	void load();
 
+	/// Initialize the exposure / weight table
+	void initTables(float saturation);
+
 	/// Merge all exposures into a single HDR image and release the RAW data
-	void merge(float saturation);
+	void merge();
+
+	/// Estimate the exposure times in case the EXIF tags can't be trusted
+	void fitExposureTimes();
 
 	/// Perform demosaicing
 	void demosaic(float *sensor2xyz);
@@ -151,6 +163,11 @@ struct ExposureSeries {
 	/// Return the number of exposures
 	inline size_t size() const {
 		return exposures.size();
+	}
+
+	/// Evaluate a pixel in one of the images
+	float eval(int img, int x, int y) const {
+		return value_tbl[exposures[img].image[x + y*width]];
 	}
 };
 

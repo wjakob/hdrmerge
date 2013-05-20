@@ -131,13 +131,15 @@ void help(char **argv, const po::options_description &desc) {
 		<< "  leaving autofocus or auto-ISO turned on by accident, and it can do useful " << endl
 		<< "  operations like cropping, resampling, and removing vignetting. Used with " << endl
 		<< "  just a single image, it works a lot like a hypothetical 'dcraw' in floating" << endl
-		<< "  point mode." << endl
+		<< "  point mode. OpenMP is used wherever possible to accelerate image processing." << endl
+		<< "  Note that this program makes the assumption that the input frames are well-" << endl
+		<< "  aligned so that no alignment correction is necessary." << endl
 		<< endl
-		<< "  The order of operations is as follows (all steps except 1 and 10 are optional" << endl
-		<< "  brackets indicate ones that disabled by default):" << endl << endl
+		<< "  The order of operations is as follows (all steps except 1 and 10 are" << endl
+		<< "  optional; brackets indicate steps that disabled by default):" << endl << endl
 		<< "    1. Load RAWs -> 2. HDR Merge -> 3. Demosaic -> 4. Transform colors -> " << endl
 		<< "    5. [White balance] -> 6. [Scale] -> 7. [Remove vignetting] -> 8. [Crop] -> " << endl
-		<< "    9. [Resample] -> 8. Write OpenEXR" << endl
+		<< "    9. [Resample] -> 10. [Rotate/flip] -> 11. Write OpenEXR" << endl
 		<< endl
 		<< "The following sections contain additional information on some of these steps." << endl
 		<< endl
@@ -155,6 +157,16 @@ void help(char **argv, const po::options_description &desc) {
 		<< "  furthermore weighted such that only well-exposed pixels contribute to this" << endl
 		<< "  summation." << endl
 		<< endl
+		<< "  For this procedure, it is crucial that hdrmerge knows the correct exposure" << endl
+		<< "  time for each image. Many cameras today use exposure values that are really" << endl
+		<< "  fractional powers of two rather than common rounded values (i.e. 1/32 as " << endl
+		<< "  opposed to 1/30 sec). hdrmerge will try to retrieve the true exposure value" << endl
+		<< "  from the EXIF tag. Unfortunately, some cameras \"lie\" in their EXIF tags" << endl
+		<< "  and use yet another set of exposure times, which can seriously throw off" << endl
+		<< "  the HDR merging process. If your camera does this, pass the parameter " << endl
+		<< "  --fitexptimes to manually estimate the actual exposure times from the " << endl
+		<< "  input set of images." << endl
+		<< endl
 		<< "Step 3: Demosaic" << endl
 		<< "  This program uses Adaptive Homogeneity-Directed demosaicing (AHD) to" << endl
 		<< "  interpolate colors over the image. Importantly, demosaicing is done *after*" << endl
@@ -171,7 +183,7 @@ void help(char **argv, const po::options_description &desc) {
 		<< "Step 9: Resample" << endl
 		<< "  This program can do high quality Lanczos resampling to get lower resolution" << endl
 		<< "  output if desired. This can sometimes cause ringing on high frequency edges," << endl
-		<< "  in which case a Tent filter may be preferable (selectable via --rfilter)." << endl
+		<< "  in which case a tent filter may be preferable (selectable via --rfilter)." << endl
 		<< endl
 		<< desc << endl
 	    << "Note that all options can also be specified permanently by creating a text" << endl
@@ -196,6 +208,11 @@ int main(int argc, char **argv) {
 		("saturation", po::value<float>(),
 		    "Saturation threshold of the sensor: the ratio of the sensor's theoretical dynamic "
 			"range, at which saturation occurs in practice (in [0,1]). Estimated automatically if not specified.\n")
+		("fitexptimes", "On some cameras, the exposure times in the EXIF tags can't be trusted. Use "
+		    "this parameter to estimate them automatically for the current image sequence\n")
+		("exptimes", po::value<std::string>(),
+		    "Override the EXIF exposure times with a manually specified sequence of the "
+			"format 'time1,time2,time3,..'\n")
 		("nodemosaic", "If specified, the raw Bayer grid is exported as a grayscale EXR file\n")
 		("colormode", po::value<EColorMode>()->default_value(ESRGB, "sRGB"),
 			"Output color space (one of 'native'/'sRGB'/'XYZ')\n")
@@ -311,14 +328,38 @@ int main(int argc, char **argv) {
 		es.check();
 		if (es.size() == 0)
 			throw std::runtime_error("No input found / list of exposures to merge is empty!");
+
+		std::vector<float> exptimes = parse_list<float>(vm, "exptimes", { es.size() });
 		es.load();
 
+		/* Precompute relative exposure + weight tables */
 		float saturation = 0;
 		if (vm.count("saturation"))
 			saturation = vm["saturation"].as<float>();
+		es.initTables(saturation);
 
-		/// Step 2: HDR merge
-		es.merge(saturation);
+		if (!exptimes.empty()) {
+			cout << "Overriding exposure times: [";
+
+			for (size_t i=0; i<exptimes.size(); ++i) {
+				es.exposures[i].exposure = exptimes[i];
+				cout << es.exposures[i].toString();
+				if (i+1 < exptimes.size())
+					cout << ", ";
+			}
+			cout << "]" << endl;
+		}
+
+		if (vm.count("fitexptimes")) {
+			es.fitExposureTimes();
+			if (vm.count("exptimes"))
+				cerr << "Note: you specified --exptimes and --fitexptimes at the same time. The" << endl
+				     << "The test file exptime_showfit.m now compares these two sets of exposure" << endl
+					 << "times, rather than the fit vs EXIF." << endl << endl;
+		}
+		
+		/// Step 1: HDR merge
+		es.merge();
 
 		/// Step 3: Demosaicing
 		bool demosaic = vm.count("nodemosaic") == 0;
@@ -352,6 +393,7 @@ int main(int argc, char **argv) {
 			if (vm.count("vcorr")) {
 				cerr << "Warning: only one of --vcal and --vcorr can be specified at a time. Ignoring --vcorr" << endl;
 			}
+
 			if (demosaic)
 				es.vcal();
 			else
