@@ -1,6 +1,24 @@
 #include "hdrmerge.h"
 #include <assert.h>
 
+float TentFilter::eval(float x) const {
+	return std::max(0.0f, 1.0f - std::abs(x / m_radius));
+}
+
+float LanczosSincFilter::eval(float x) const {
+	x = std::abs(x);
+
+	if (x < 1e-4f)
+		return 1.0f;
+	else if (x > m_radius)
+		return 0.0f;
+
+	float x1 = M_PI * x;
+	float x2 = x1 / m_radius;
+
+	return (std::sin(x1) * std::sin(x2)) / (x1 * x2);
+}
+
 /**
  * Utility class for efficiently resampling discrete 
  * datasets to different resolutions

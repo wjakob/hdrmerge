@@ -25,10 +25,10 @@ include_directories(${EXIV2_INCLUDE_DIR})
 include_directories(${Boost_INCLUDE_DIR})
 
 # Compile with C++11 features
-set(CMAKE_CXX_FLAGS "-std=c++11 -g -Wall -fno-omit-frame-pointer ${CMAKE_CXX_FLAGS}")
+set(CMAKE_CXX_FLAGS "-std=c++11 -Wall ${CMAKE_CXX_FLAGS}")
 
 add_subdirectory(rawspeed)
-add_executable(hdrmerge input.cpp output.cpp main.cpp hdr.cpp fit.cpp resample.cpp)
+add_executable(hdrmerge input.cpp output.cpp main.cpp hdr.cpp fitexp.cpp resample.cpp misc.cpp)
 target_link_libraries(hdrmerge rawspeed ${LIBXML2_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT}
 	${JPEG_LIBRARIES} ${OPENEXR_ILMIMF_LIBRARY} ${OPENEXR_HALF_LIBRARY}
 	${OPENEXR_IEX_LIBRARY} ${OPENEXR_ILMBASE_LIBRARY} ${EXIV2_LIBRARY}

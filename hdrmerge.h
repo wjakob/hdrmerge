@@ -171,6 +171,32 @@ struct ExposureSeries {
 	}
 };
 
+/// Windowed Lanczos filter
+class LanczosSincFilter : public ReconstructionFilter {
+public:
+	LanczosSincFilter(float radius = 3) : m_radius(radius) { }
+
+	float getRadius() const { return m_radius; }
+
+	float eval(float x) const;
+private:
+	float m_radius;
+};
+
+/// Tent filter
+class TentFilter : public ReconstructionFilter {
+public:
+	TentFilter(float radius = 1) : m_radius(radius) { }
+
+	float getRadius() const { return m_radius; }
+
+	float eval(float x) const;
+private:
+	float m_radius;
+};
+
+
+
 /// Return the number of processors available for multithreading
 extern int getProcessorCount();
 
@@ -201,5 +227,40 @@ inline float clamp(float value, float min, float max) {
 inline float square(float value) {
 	return value*value;
 }
+
+enum ERotateFlipType {
+	ERotateNoneFlipNone = 0,
+	ERotate180FlipXY    = ERotateNoneFlipNone,
+	ERotate90FlipNone   = 1,
+	ERotate270FlipXY    = ERotate90FlipNone,
+	ERotate180FlipNone  = 2,
+	ERotateNoneFlipXY   = ERotate180FlipNone,
+	ERotate270FlipNone  = 3,
+	ERotate90FlipXY     = ERotate270FlipNone,
+	ERotateNoneFlipX    = 4,
+	ERotate180FlipY     = ERotateNoneFlipX,
+	ERotate90FlipX      = 5,
+	ERotate270FlipY     = ERotate90FlipX,
+	ERotate180FlipX     = 6,
+	ERotateNoneFlipY    = ERotate180FlipX,
+	ERotate270FlipX     = 7,
+	ERotate90FlipY      = ERotate270FlipX
+};
+
+// Rotate and/or flip an arbitrary image
+extern void rotateFlip(
+		uint8_t *src,  size_t  s_width, size_t  s_height,
+		uint8_t *&dst, size_t &t_width, size_t &t_height,
+		int bypp, ERotateFlipType type);
+
+extern ERotateFlipType flipTypeFromString(int rotation, std::string axes);
+
+enum EColorMode {
+	ENative,
+	ESRGB,
+	EXYZ
+};
+
+extern std::istream& operator>>(std::istream& in, EColorMode& unit);
 
 #endif /* __HDRMERGE_H */

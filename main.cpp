@@ -4,74 +4,9 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/format.hpp>
 #include <fstream>
-#include <unistd.h>
 #include "hdrmerge.h"
 
 namespace po = boost::program_options;
-
-enum EColorMode {
-	ENative,
-	ESRGB,
-	EXYZ
-};
-
-std::istream& operator>>(std::istream& in, EColorMode& unit) {
-	std::string token;
-	in >> token;
-	std::string token_lc = boost::to_lower_copy(token);
-
-	if (token_lc == "native")
-		unit = ENative;
-	else if (token_lc == "srgb")
-		unit = ESRGB;
-	else if (token_lc == "xyz")
-		unit = EXYZ;
-	else
-		throw po::validation_error(po::validation_error::invalid_option_value, "colormode", token);
-	return in;
-}
-
-/// Windowed Lanczos filter
-class LanczosSincFilter : public ReconstructionFilter {
-public:
-	LanczosSincFilter(float radius = 3) : m_radius(radius) { }
-
-	float getRadius() const {
-		return m_radius;
-	}
-
-	float eval(float x) const {
-		x = std::abs(x);
-
-		if (x < 1e-4f)
-			return 1.0f;
-		else if (x > m_radius)
-			return 0.0f;
-
-		float x1 = M_PI * x;
-		float x2 = x1 / m_radius;
-
-		return (std::sin(x1) * std::sin(x2)) / (x1 * x2);
-	}
-private:
-	float m_radius;
-};
-
-/// Tent filter
-class TentFilter : public ReconstructionFilter {
-public:
-	TentFilter(float radius = 1) : m_radius(radius) { }
-
-	float getRadius() const {
-		return m_radius;
-	}
-
-	float eval(float x) const {
-		return std::max(0.0f, 1.0f - std::abs(x / m_radius));
-	}
-private:
-	float m_radius;
-};
 
 template <typename T> std::vector<T> parse_list(const po::variables_map &vm, 
 		const std::string &name, const std::vector<size_t> &nargs, 
@@ -111,16 +46,18 @@ template <typename T> std::vector<T> parse_list(const po::variables_map &vm,
 	return result;
 }
 
-int getProcessorCount() {
-	return sysconf(_SC_NPROCESSORS_CONF);
-}
-
 void help(char **argv, const po::options_description &desc) {
 	cout << "RAW to HDR merging tool, written by Wenzel Jakob <wenzel@cs.cornell.edu>" << endl
 		<< "Version 1.0 (May 2013). Source @ https://github.com/wjakob/hdrmerge" << endl
 		<< endl
 		<< "Syntax: " << argv[0] << " [options] <RAW file format string / list of multiple files>" << endl
 		<< endl
+		<< "Motivation:"<< endl
+		<< "  hdrmerge is a scientific HDR merging tool: its goal is to create images that" << endl
+		<< "  are accurate linear measurements of the radiance received by the camera." << endl
+		<< "  It does not do any fancy noicy removal or other types of postprocessing" << endl
+		<< "  and instead tries to be simple, understandable and hackable." << endl
+	    << endl
 		<< "Summary:"<< endl
 		<< "  This program takes an exposure series of DNG/CR2/.. RAW files and merges it" << endl
 		<< "  into a high dynamic-range EXR image. Given a printf-style format expression" << endl
@@ -139,7 +76,7 @@ void help(char **argv, const po::options_description &desc) {
 		<< "  optional; brackets indicate steps that disabled by default):" << endl << endl
 		<< "    1. Load RAWs -> 2. HDR Merge -> 3. Demosaic -> 4. Transform colors -> " << endl
 		<< "    5. [White balance] -> 6. [Scale] -> 7. [Remove vignetting] -> 8. [Crop] -> " << endl
-		<< "    9. [Resample] -> 10. [Rotate/flip] -> 11. Write OpenEXR" << endl
+		<< "    9. [Resample] -> 10. [Flip/rotate] -> 11. Write OpenEXR" << endl
 		<< endl
 		<< "The following sections contain additional information on some of these steps." << endl
 		<< endl
@@ -238,6 +175,9 @@ int main(int argc, char **argv) {
 		("vcal", "Calibrate vignetting correction given a uniformly illuminated image\n")
 		("vcorr", po::value<std::string>(),
 		    "Apply the vignetting correction computed using --vcal\n")
+		("flip", po::value<std::string>()->default_value(""), "Flip the output image along the "
+		  "specified axes (one of 'x', 'y', or 'xy')\n")
+		("rotate", po::value<int>()->default_value(0), "Rotate the output image by 90, 180 or 270 degrees\n")
 		("single", "Write EXR files in single precision instead of half precision?\n")
 		("output", po::value<std::string>()->default_value("output.exr"),
 			"Name of the output file in OpenEXR format");
@@ -437,7 +377,25 @@ int main(int argc, char **argv) {
 			}
 		}
 
-		// Step 10: Write output
+		// Step 10: Flip / rotate
+		ERotateFlipType flipType = flipTypeFromString(
+			vm["rotate"].as<int>(), vm["flip"].as<std::string>());
+
+		if (flipType != ERotateNoneFlipNone) {
+			uint8_t *t_buf;
+			size_t t_width, t_height;
+			
+			if (demosaic) {
+				rotateFlip((uint8_t *) es.image_demosaiced, es.width, es.height,
+					t_buf, t_width, t_height, 3*sizeof(float), flipType);
+				delete[] es.image_demosaiced;
+				es.image_demosaiced = (float3 *) t_buf;
+				es.width = t_width;
+				es.height = t_height;
+			}
+		}
+
+		// Step 11: Write output
 		std::string output = vm["output"].as<std::string>();
 		bool half = vm.count("single") == 0;
 
