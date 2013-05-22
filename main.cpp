@@ -178,9 +178,12 @@ int main(int argc, char **argv) {
 		("flip", po::value<std::string>()->default_value(""), "Flip the output image along the "
 		  "specified axes (one of 'x', 'y', or 'xy')\n")
 		("rotate", po::value<int>()->default_value(0), "Rotate the output image by 90, 180 or 270 degrees\n")
-		("single", "Write EXR files in single precision instead of half precision?\n")
+		("format", po::value<std::string>()->default_value("half"), 
+		  "Choose the desired output file format -- one of 'half' (OpenEXR, 16 bit HDR / half precision), "
+		  "'single' (OpenEXR, 32 bit / single precision), 'jpeg' (libjpeg, 8 bit LDR for convenience)\n")
 		("output", po::value<std::string>()->default_value("output.exr"),
-			"Name of the output file in OpenEXR format");
+			"Name of the output file in OpenEXR format. When only a single RAW file is processed, its "
+			"name is used by default (with the ending replaced by .exr/.jpeg");
 
 	hidden_options.add_options()
 		("input-files", po::value<std::vector<std::string>>(), "Input files");
@@ -261,7 +264,7 @@ int main(int argc, char **argv) {
 		if (vm.count("scale"))
 			scale = vm["scale"].as<float>();
 
-		// Step 1: Load RAW
+		/// Step 1: Load RAW
 		ExposureSeries es;
 		for (size_t i=0; i<exposures.size(); ++i)
 			es.add(exposures[i]);
@@ -272,7 +275,7 @@ int main(int argc, char **argv) {
 		std::vector<float> exptimes = parse_list<float>(vm, "exptimes", { es.size() });
 		es.load();
 
-		/* Precompute relative exposure + weight tables */
+		/// Precompute relative exposure + weight tables
 		float saturation = 0;
 		if (vm.count("saturation"))
 			saturation = vm["saturation"].as<float>();
@@ -377,7 +380,7 @@ int main(int argc, char **argv) {
 			}
 		}
 
-		// Step 10: Flip / rotate
+		/// Step 10: Flip / rotate
 		ERotateFlipType flipType = flipTypeFromString(
 			vm["rotate"].as<int>(), vm["flip"].as<std::string>());
 
@@ -395,16 +398,40 @@ int main(int argc, char **argv) {
 			}
 		}
 
-		// Step 11: Write output
+		/// Step 11: Write output
 		std::string output = vm["output"].as<std::string>();
-		bool half = vm.count("single") == 0;
+		std::string format = boost::to_lower_copy(vm["format"].as<std::string>());
+
+		if (vm["output"].defaulted() && exposures.size() == 1 && exposures[0].find("%") == std::string::npos) {
+			std::string fname = exposures[0];
+			size_t spos = fname.find_last_of(".");
+			if (spos != std::string::npos)
+				output = fname.substr(0, spos) + ".exr";
+		}
+
+		if (format == "jpg")
+			format = "jpeg";
+
+		if (format == "jpeg" && boost::ends_with(output,  ".exr"))
+			output = output.substr(0, output.length()-4) + ".jpg";
 
 		if (demosaic) {
-			writeOpenEXR(output, es.width, es.height, 3,
-				(float *) es.image_demosaiced, es.metadata, half);
+			if (format == "half" || format == "single")
+				writeOpenEXR(output, es.width, es.height, 3,
+					(float *) es.image_demosaiced, es.metadata, format == "half");
+			else if (format == "jpeg")
+				writeJPEG(output, es.width, es.height, (float *) es.image_demosaiced);
+			else
+				throw std::runtime_error("Unsupported --format argument");
 		} else {
-			writeOpenEXR(output, es.width, es.height, 1,
-				(float *) es.image_merged, es.metadata, half);
+			if (format == "half" || format == "single")
+				writeOpenEXR(output, es.width, es.height, 1,
+					(float *) es.image_merged, es.metadata, format == "half");
+			else if (format == "jpeg")
+				throw std::runtime_error("Tried to export the raw Bayer grid "
+					"as a JPEG image -- this is not allowed.");
+			else
+				throw std::runtime_error("Unsupported --format argument");
 		}
 	} catch (const std::exception &ex) {
 		cerr << "Encountered a fatal error: " << ex.what() << endl;

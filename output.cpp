@@ -1,7 +1,15 @@
 #include "hdrmerge.h"
+
+#include <boost/format.hpp>
+
 #include <ImfOutputFile.h>
 #include <ImfChannelList.h>
 #include <ImfStringAttribute.h>
+
+extern "C" {
+	#include <jpeglib.h>
+	#include <jerror.h>
+};
 
 void writeOpenEXR(const std::string &filename, size_t w, size_t h, int nChannels, float *data, const StringMap &metadata, bool writeHalf) {
 	Imf::setGlobalThreadCount(getProcessorCount());
@@ -77,5 +85,67 @@ void writeOpenEXR(const std::string &filename, size_t w, size_t h, int nChannels
 	} else {
 		throw std::runtime_error("writeOpenEXR(): unknown number of channels!");
 	}
+}
+
+extern "C" {
+	METHODDEF(void) jpeg_error_exit (j_common_ptr cinfo) throw(std::runtime_error) {
+		char msg[JMSG_LENGTH_MAX];
+		(*cinfo->err->format_message) (cinfo, msg);
+		throw std::runtime_error((boost::format("Critcal libjpeg error: %1%") % msg).str());
+	}
+};
+
+void writeJPEG(const std::string &filename, size_t w, size_t h, float *data, int quality) {
+	struct jpeg_compress_struct cinfo;
+	struct jpeg_error_mgr jerr;
+
+	FILE *file = fopen(filename.c_str(), "w");
+	if (!file)
+		throw std::runtime_error("Unable to open output file");
+
+	cout << "Writing " << filename << " (" << w << "x" << h << ", "
+		 << "3 channels, low dynamic range) .. " << endl;
+
+	cinfo.err = jpeg_std_error(&jerr);
+	jerr.error_exit = jpeg_error_exit;
+	jpeg_create_compress(&cinfo);
+	jpeg_stdio_dest(&cinfo, file);
+
+	cinfo.image_width = (int) w;
+	cinfo.image_height = (int) h;
+	cinfo.input_components = 3;
+	cinfo.in_color_space = JCS_RGB;
+
+	jpeg_set_defaults(&cinfo);
+	jpeg_set_quality(&cinfo, quality, TRUE);
+	jpeg_start_compress(&cinfo, TRUE);
+
+	uint8_t *buffer = new uint8_t[w * h * 3];
+	uint8_t **scanlines = new uint8_t*[h];
+
+	#pragma omp parallel for
+	for (size_t i=0; i<h; ++i) {
+		float *in_ptr = data + w * i * 3;
+		uint8_t *out_ptr = buffer + w * i * 3;
+		scanlines[i] = out_ptr;
+
+		for (size_t j=0; j<3*w; ++j) {
+			float value = *in_ptr++;
+			if (value <= 0.0031308f)
+				value = 12.92f * value;
+			else
+				value = 1.055f * std::pow(value, 1.0f/2.4f) - 0.055f;
+			
+			*out_ptr ++ = (uint8_t) std::max(std::min(255.0f, std::round(value * 255.0f)), 0.0f);
+		}
+	}
+	jpeg_write_scanlines(&cinfo, scanlines, (int) h);
+
+	/* Release the libjpeg data structures */
+	jpeg_finish_compress(&cinfo);
+	jpeg_destroy_compress(&cinfo);
+	delete[] buffer;
+	delete[] scanlines;
+	fclose(file);
 }
 

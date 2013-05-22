@@ -1,0 +1,5 @@
+- Support writing only a single channel of the Bayer grid
+- Dark frames
+- Dynamic programming-based image alignment
+- Write grayscale output
+- Write JPG output

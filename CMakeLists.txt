@@ -12,6 +12,7 @@ find_package(Threads REQUIRED)
 find_package(OpenEXR REQUIRED)
 find_package(EXIV2 REQUIRED)
 find_package(OpenMP)
+find_package(JPEG)
 find_package(Boost 1.40 COMPONENTS program_options REQUIRED )
 
 if (OPENMP_FOUND)
@@ -23,6 +24,7 @@ include_directories(${LIBXML2_INCLUDE_DIR})
 include_directories(${OPENEXR_INCLUDE_PATHS})
 include_directories(${EXIV2_INCLUDE_DIR})
 include_directories(${Boost_INCLUDE_DIR})
+include_directories(${JPEG_INCLUDE_DIR})
 
 # Compile with C++11 features
 set(CMAKE_CXX_FLAGS "-std=c++11 -Wall ${CMAKE_CXX_FLAGS}")
@@ -32,4 +34,4 @@ add_executable(hdrmerge input.cpp output.cpp main.cpp hdr.cpp fitexp.cpp resampl
 target_link_libraries(hdrmerge rawspeed ${LIBXML2_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT}
 	${JPEG_LIBRARIES} ${OPENEXR_ILMIMF_LIBRARY} ${OPENEXR_HALF_LIBRARY}
 	${OPENEXR_IEX_LIBRARY} ${OPENEXR_ILMBASE_LIBRARY} ${EXIV2_LIBRARY}
-	${Boost_LIBRARIES})
+	${Boost_LIBRARIES} ${JPEG_LIBRARIES})

@@ -207,6 +207,8 @@ extern int getProcessorCount();
 extern void writeOpenEXR(const std::string &filename, size_t w, size_t h,
 	int channels, float *data, const StringMap &metadata, bool writeHalf);
 
+void writeJPEG(const std::string &filename, size_t w, size_t h, float *data, int quality = 100);
+
 /// Generate a uniformly distributed random number in [0, 1)
 inline float randf() {
 	#define RS_SCALE (1.0f / (1.0f + RAND_MAX))
