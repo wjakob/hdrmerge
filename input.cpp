@@ -2,6 +2,9 @@
 
 #include <mutex>
 #include <unistd.h>
+#include <libgen.h>
+#include <sys/stat.h>
+#include <limits.h>
 #include <boost/format.hpp>
 
 #include <exiv2/image.hpp>
@@ -177,8 +180,34 @@ void ExposureSeries::check() {
 	cout << "Collected " << metadata.size() << " metadata entries." << endl;
 }
 
+inline bool fexists(const std::string& name) {
+	  struct stat buffer;   
+	    return (stat (name.c_str(), &buffer) == 0); 
+}
+
 void ExposureSeries::load() {
-	std::unique_ptr<CameraMetaData> metadata(new CameraMetaData("rawspeed/data/cameras.xml"));
+	std::unique_ptr<CameraMetaData> metadata;
+
+	char basepath[PATH_MAX];
+	basepath[0] = '\0';
+	if (readlink("/proc/self/exe", basepath, PATH_MAX) == -1)
+		throw std::runtime_error("Unable to read the path of the current binary.");
+
+	dirname(basepath);
+	std::string candidate1 = "rawspeed/data/cameras.xml";
+	std::string candidate2 = std::string(basepath) + "/" + candidate1;
+	std::string candidate3 = std::string(basepath) + "/cameras.xml";
+
+	if (fexists(candidate1))
+		metadata.reset(new CameraMetaData(candidate1.c_str()));
+	else if (fexists(candidate2))
+		metadata.reset(new CameraMetaData(candidate2.c_str()));
+	else if (fexists(candidate3))
+		metadata.reset(new CameraMetaData(candidate3.c_str()));
+	else
+		throw std::runtime_error((boost::format("Unable to detect the path of "
+		"\"cameras.xml\" -- checked at \"%1%\", \"%2%\", and \"%3%\"")
+		% candidate1 % candidate2 % candidate3).str());
 
 	cout << "Loading raw image data ..";
 	cout.flush();
