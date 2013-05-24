@@ -188,15 +188,16 @@ bool fexists(const std::string& name) {
 void ExposureSeries::load() {
 	std::unique_ptr<CameraMetaData> metadata;
 
-	char basepath[PATH_MAX];
-	basepath[0] = '\0';
-	if (readlink("/proc/self/exe", basepath, PATH_MAX) == -1)
+	char exe_path[PATH_MAX];
+	ssize_t exe_path_size = readlink("/proc/self/exe", exe_path, PATH_MAX);
+	if (exe_path_size == -1)
 		throw std::runtime_error("Unable to read the path of the current binary.");
+	exe_path[exe_path_size] = '\0';
 
-	dirname(basepath);
+	std::string basedir = dirname(exe_path);
 	std::string candidate1 = "rawspeed/data/cameras.xml";
-	std::string candidate2 = std::string(basepath) + "/" + candidate1;
-	std::string candidate3 = std::string(basepath) + "/cameras.xml";
+	std::string candidate2 = basedir + "/" + candidate1;
+	std::string candidate3 = basedir + "/cameras.xml";
 
 	if (fexists(candidate1))
 		metadata.reset(new CameraMetaData(candidate1.c_str()));
