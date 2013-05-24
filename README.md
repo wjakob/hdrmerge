@@ -74,17 +74,22 @@ to start the compilation.
       the HDR merging process. If your camera does this, pass the parameter 
       --fitexptimes to manually estimate the actual exposure times from the 
       input set of images.
-    
-      A subtle issue that one should be aware of is that many current SLR cameras
-      have rather inaccurate shutters. Take a sequence of a still scene at
-      identical camera settings, and you will notice that there is a perceptible
-      amount of flickering when turning it into a movie. This is because the radius
-      of your camera's aperture in each shot may vary by a random amount that could
-      be as large as 5%. There are two workarounds: 1. shoot wide open, or 2. use
-      a trick used by time-lapse photographers that is referred to as 'lens twist'
-      or 'aperture twist' (search for these keywords online to find videos that
-      demonstrating how it works)
-    
+ 
+      A subtle issue that one should be aware of is that even professional-grade
+      lenses from the big two SLR manufactorers tend to have rather inaccurate 
+      apertures. Take a photo sequence of a still scene at identical camera
+      settings, and you will notice that there is a perceptible amount of flicker
+      when turning it into a movie. This is because the aperture radius in each
+      shot may vary by a random amount that could be as large as 5%. This is not
+      not much of an issue if you're just doing video capture or still
+      photography, hence lens manufacturers don't correct for it. But it can
+      cause significant headaches in long capture sessions, where it introduces
+      random intensity scale factors from image to image. There are two
+      workarounds: 1. shoot wide open, or 2. use a trick used by time-lapse
+      photographers that is referred to as 'lens twist' or 'aperture twist'
+      (search for these keywords online to find videos that demonstrate
+      how it works).
+
     Step 3: Demosaic
       This program uses Adaptive Homogeneity-Directed demosaicing (AHD) to
       interpolate colors over the image. Importantly, demosaicing is done *after*
