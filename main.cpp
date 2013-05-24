@@ -104,6 +104,16 @@ void help(char **argv, const po::options_description &desc) {
 		<< "  --fitexptimes to manually estimate the actual exposure times from the " << endl
 		<< "  input set of images." << endl
 		<< endl
+		<< "  A subtle issue that one should be aware of is that many current SLR cameras" << endl
+		<< "  have rather inaccurate shutters. Take a sequence of a still scene at" << endl
+		<< "  identical camera settings, and you will notice that there is a perceptible" << endl
+		<< "  amount of flickering when turning it into a movie. This is because the radius" << endl
+		<< "  of your camera's aperture in each shot may vary by a random amount that could" << endl
+		<< "  be as large as 5\%. There are two workarounds: 1. shoot wide open, or 2. use" << endl
+		<< "  a trick used by time-lapse photographers that is referred to as 'lens twist'" << endl
+		<< "  or 'aperture twist' (search for these keywords online to find videos that" << endl
+		<< "  demonstrating how it works)" << endl
+		<< endl
 		<< "Step 3: Demosaic" << endl
 		<< "  This program uses Adaptive Homogeneity-Directed demosaicing (AHD) to" << endl
 		<< "  interpolate colors over the image. Importantly, demosaicing is done *after*" << endl

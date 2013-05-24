@@ -4,7 +4,7 @@ are accurate linear measurements of the radiance received by a camera capable
 of producing RAW output. It does not do any fancy noicy removal or other types
 of postprocessing and instead tries to be simple, understandable and hackable.
 
-### Compiling:
+### Compiling
 You will need a recent C++ compiler with support for C++11 and OpenMP. Only g++4.8
 has been tested so far. This program depends on: libxml2 (for RawSpeed), libjpeg,
 OpenEXR, libexiv2 and Boost.
@@ -21,6 +21,12 @@ to start the compilation.
 
 ### Usage
     Syntax: ./hdrmerge [options] <RAW file format string / list of multiple files>
+    
+    Motivation:
+      hdrmerge is a scientific HDR merging tool: its goal is to create images that
+      are accurate linear measurements of the radiance received by the camera.
+      It does not do any fancy noicy removal or other types of postprocessing
+      and instead tries to be simple, understandable and hackable.
     
     Summary:
       This program takes an exposure series of DNG/CR2/.. RAW files and merges it
@@ -69,6 +75,16 @@ to start the compilation.
       --fitexptimes to manually estimate the actual exposure times from the 
       input set of images.
     
+      A subtle issue that one should be aware of is that many current SLR cameras
+      have rather inaccurate shutters. Take a sequence of a still scene at
+      identical camera settings, and you will notice that there is a perceptible
+      amount of flickering when turning it into a movie. This is because the radius
+      of your camera's aperture in each shot may vary by a random amount that could
+      be as large as 5%. There are two workarounds: 1. shoot wide open, or 2. use
+      a trick used by time-lapse photographers that is referred to as 'lens twist'
+      or 'aperture twist' (search for these keywords online to find videos that
+      demonstrating how it works)
+    
     Step 3: Demosaic
       This program uses Adaptive Homogeneity-Directed demosaicing (AHD) to
       interpolate colors over the image. Importantly, demosaicing is done *after*
@@ -89,6 +105,12 @@ to start the compilation.
     
     Command line options:
       --help                     Print information on how to use this program
+                                 
+      --config arg               Load the configuration file 'arg' as an additional
+                                 source of command line parameters. Should contain 
+                                 one parameter per line in key=value format. The 
+                                 command line takes precedence when an argument is 
+                                 specified multiple times.
                                  
       --saturation arg           Saturation threshold of the sensor: the ratio of 
                                  the sensor's theoretical dynamic range, at which 
@@ -143,10 +165,15 @@ to start the compilation.
                                  
       --rotate arg (=0)          Rotate the output image by 90, 180 or 270 degrees
                                  
-      --single                   Write EXR files in single precision instead of 
-                                 half precision?
+      --format arg (=half)       Choose the desired output file format -- one of 
+                                 'half' (OpenEXR, 16 bit HDR / half precision), 
+                                 'single' (OpenEXR, 32 bit / single precision), 
+                                 'jpeg' (libjpeg, 8 bit LDR for convenience)
                                  
-      --output arg (=output.exr) Name of the output file in OpenEXR format
+      --output arg (=output.exr) Name of the output file in OpenEXR format. When 
+                                 only a single RAW file is processed, its name is 
+                                 used by default (with the ending replaced by 
+                                 .exr/.jpeg
     
     Note that all options can also be specified permanently by creating a text
     file named 'hdrmerge.cfg' in the current directory. It should contain options
@@ -158,3 +185,6 @@ to start the compilation.
     
       As above, but explicitly specify the files (in any order):
         $ hdrmerge --output scene.exr scene_001.cr2 scene_002.cr2 scene_003.cr2
+### License
+hdrmerge is licensed under the GNU General Public License (Version 3),
+which can be retrieved at the following address: http://www.gnu.org/licenses/gpl-3.0.txt
