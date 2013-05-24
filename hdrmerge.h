@@ -230,6 +230,9 @@ inline float square(float value) {
 	return value*value;
 }
 
+/// check if a file exists
+bool fexists(const std::string& name);
+
 enum ERotateFlipType {
 	ERotateNoneFlipNone = 0,
 	ERotate180FlipXY    = ERotateNoneFlipNone,

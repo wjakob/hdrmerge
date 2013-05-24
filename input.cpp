@@ -180,7 +180,7 @@ void ExposureSeries::check() {
 	cout << "Collected " << metadata.size() << " metadata entries." << endl;
 }
 
-inline bool fexists(const std::string& name) {
+bool fexists(const std::string& name) {
 	  struct stat buffer;   
 	    return (stat (name.c_str(), &buffer) == 0); 
 }

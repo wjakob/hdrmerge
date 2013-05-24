@@ -138,10 +138,14 @@ void help(char **argv, const po::options_description &desc) {
 int main(int argc, char **argv) {
 	po::options_description options("Command line options");
 	po::options_description hidden_options("Hiden options");
-	po::variables_map vm;
+	po::variables_map vm, vm_temp;
 
 	options.add_options()
 		("help", "Print information on how to use this program\n")
+		("config", po::value<std::string>(),
+		    "Load the configuration file 'arg' as an additional source of command line parameters. "
+			"Should contain one parameter per line in key=value format. The command line takes precedence "
+			"when an argument is specified multiple times.\n")
 		("saturation", po::value<float>(),
 		    "Saturation threshold of the sensor: the ratio of the sensor's theoretical dynamic "
 			"range, at which saturation occurs in practice (in [0,1]). Estimated automatically if not specified.\n")
@@ -187,17 +191,29 @@ int main(int argc, char **argv) {
 
 	hidden_options.add_options()
 		("input-files", po::value<std::vector<std::string>>(), "Input files");
-
+		
 	po::options_description all_options;
 	all_options.add(options).add(hidden_options);
+	po::positional_options_description positional;
+	positional.add("input-files", -1);
 
 	try {
-		std::ifstream settings("hdrmerge.cfg", std::ifstream::in);
-		po::store(po::parse_config_file(settings, all_options), vm);
-		settings.close();
+		/* Temporary command line parsing pass */
+		po::store(po::command_line_parser(argc, argv)
+			.options(all_options).positional(positional).run(), vm_temp);
 
-		po::positional_options_description positional;
-		positional.add("input-files", -1);
+		/* Is there a configuration file */
+		std::string config = "hdrmerge.cfg";
+
+		if (vm_temp.count("config"))
+			config = vm_temp["config"].as<std::string>();
+	
+		if (fexists(config)) {
+			std::ifstream settings(config, std::ifstream::in);
+			po::store(po::parse_config_file(settings, all_options), vm);
+			settings.close();
+		}
+
 		po::store(po::command_line_parser(argc, argv)
 			.options(all_options).positional(positional).run(), vm);
 		if (vm.count("help") || !vm.count("input-files")) {
