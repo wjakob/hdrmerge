@@ -27,7 +27,7 @@ template <typename T> std::vector<T> parse_list(const po::variables_map &vm,
 		throw std::runtime_error((boost::format("Unable to parse the '%1%' argument!") % name).str());
 	}
 
-	bool good = false;
+	bool good = nargs.empty();
 	std::ostringstream oss;
 	for (size_t i=0; i<nargs.size(); ++i) {
 		if (result.size() == nargs[i]) {
@@ -313,7 +313,7 @@ int main(int argc, char **argv) {
 				exptimes = parse_list<float>(vm, "exptimes", { es.size() });
 			} else {
 				/* Map of exposure time replacement values */
-				std::vector<std::string> map_str = parse_list<std::string>(vm, "exptimes", { es.size() }, ",");
+				std::vector<std::string> map_str = parse_list<std::string>(vm, "exptimes", { }, ",");
 				for (size_t i=0; i<map_str.size(); ++i) {
 					std::vector<std::string> v;
 					boost::algorithm::iter_split(v, map_str[i], boost::algorithm::first_finder("->"));
