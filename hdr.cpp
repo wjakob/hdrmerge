@@ -32,27 +32,25 @@ void ExposureSeries::initTables(float saturation) {
 		memcpy(temp, exposures[size()-1].image, npix*sizeof(uint16_t));
 		size_t percentile = (size_t) (npix*0.999);
 		std::nth_element(temp, temp+percentile, temp+npix);
-		saturation = *(temp+percentile);
+		saturation = (*(temp+percentile)-blacklevel) / (float) (whitepoint-blacklevel);
 		delete[] temp;
-
-		float saturation_frac = saturation = (saturation-blacklevel) / (float) (whitepoint-blacklevel);
 
 		cerr << endl
 			 << "*******************************************************************************" << endl
 			 << "Warning: The HDR merging step needs to know the sensor's saturation threshold." << endl
 			 << "This is the percentage of the sensor's theoretical dynamic range, at which" << endl
 			 << "saturation occurs in practice. Based on the brightest image region in your " << endl
-			 << "longest exposure, this was estimated to be around " << saturation_frac*100 << "\% (for Canon cameras," << endl
+			 << "longest exposure, this was estimated to be around " << saturation*100 << "\% (for Canon cameras," << endl
 			 << "this number is usually around 80\%). This estimatimation of course only" << endl
 			 << "works if your longest exposure does indeed contain overexposed pixels..." << endl
 			 << endl
 			 << "If you are going to process a larger set of measurements, it is advisable to" << endl
-			 << "lock this parameter by creating a line \"saturation=" << saturation_frac << "\" in hdrmerge.cfg" << endl
+			 << "lock this parameter by creating a line \"saturation=" << saturation << "\" in hdrmerge.cfg" << endl
 			 << "*******************************************************************************" << endl
 			 << endl;
-	} else {
-		saturation = saturation * (whitepoint-blacklevel) + blacklevel;
 	}
+
+	saturation = saturation * (whitepoint-blacklevel) + blacklevel;
 
 	/* Precompute weight table */
 	for (int i=0; i<0xFFFF; ++i)
