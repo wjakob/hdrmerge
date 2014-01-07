@@ -20,7 +20,7 @@ float LanczosSincFilter::eval(float x) const {
 }
 
 /**
- * Utility class for efficiently resampling discrete 
+ * Utility class for efficiently resampling discrete
  * datasets to different resolutions
  *
  * (simplified ported version from Mitsuba)
@@ -38,7 +38,7 @@ struct Resampler {
 	 * \param targetRes
 	 *      Desired target resolution
 	 */
-	Resampler(const ReconstructionFilter &rfilter, 
+	Resampler(const ReconstructionFilter &rfilter,
 			int sourceRes, int targetRes) : m_sourceRes(sourceRes), m_targetRes(targetRes) {
 		assert(sourceRes > 0 && targetRes > 0);
 		float filterRadius = rfilter.getRadius(), scale = 1.0f, invScale = 1.0f;

@@ -39,7 +39,7 @@ struct Patch {
 	void computeStatistics(const ExposureSeries &es, int img, float *min, float *max, float *rel_stddev) const {
 		float mean[3], variance[3];
 		int count[3];
-		
+
 		for (int i=0; i<3; ++i) {
 			min[i]      =  std::numeric_limits<float>::infinity();
 			max[i]      = -std::numeric_limits<float>::infinity();
@@ -69,7 +69,7 @@ struct Patch {
 				variance[color] += diff*diff;
 			}
 		}
-	
+
 		for (int i=0; i<3; ++i)
 			rel_stddev[i] = std::sqrt(variance[i] / (count[i]-1)) / std::abs(mean[i]);
 	}
@@ -94,7 +94,7 @@ struct Patch {
 		float min[3], max[3], rel_stddev[3];
 		computeStatistics(es, img, min, max, rel_stddev);
 
-		return 
+		return
 			min[ch] > 0.01 &&
 			max[ch] < es.saturation-0.05 &&
 			rel_stddev[ch] < 0.1f;
@@ -106,7 +106,7 @@ struct Patch {
 		       std::abs(y-p.y) < patch_size;
 	}
 };
-	
+
 void ExposureSeries::fitExposureTimes() {
 	const int patches_per_exposure = 200,
 	          max_tries            = patches_per_exposure * 100,
@@ -157,7 +157,7 @@ void ExposureSeries::fitExposureTimes() {
 			++good_exposures;
 	}
 
-	
+
 	if (good_exposures < 3)
 		throw std::runtime_error("Less than 3 good exposures ..  this is not going to work!");
 
@@ -190,7 +190,7 @@ void ExposureSeries::fitExposureTimes() {
 			++exposure_idx;
 		}
 	}
-	
+
 	float longestExposure;
 	for (size_t img=0; img<exposures.size(); ++img) {
 		if (!good[img])

@@ -135,7 +135,7 @@ void writeJPEG(const std::string &filename, size_t w, size_t h, float *data, int
 				value = 12.92f * value;
 			else
 				value = 1.055f * std::pow(value, 1.0f/2.4f) - 0.055f;
-			
+
 			*out_ptr ++ = (uint8_t) std::max(std::min(255.0f, std::round(value * 255.0f)), 0.0f);
 		}
 	}

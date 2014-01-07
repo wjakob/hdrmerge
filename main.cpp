@@ -8,8 +8,8 @@
 
 namespace po = boost::program_options;
 
-template <typename T> std::vector<T> parse_list(const po::variables_map &vm, 
-		const std::string &name, const std::vector<size_t> &nargs, 
+template <typename T> std::vector<T> parse_list(const po::variables_map &vm,
+		const std::string &name, const std::vector<size_t> &nargs,
 		const char *sepstr = " ,") {
 	std::vector<T> result;
 
@@ -197,7 +197,7 @@ int main(int argc, char **argv) {
 		("flip", po::value<std::string>()->default_value(""), "Flip the output image along the "
 		  "specified axes (one of 'x', 'y', or 'xy')\n")
 		("rotate", po::value<int>()->default_value(0), "Rotate the output image by 90, 180 or 270 degrees\n")
-		("format", po::value<std::string>()->default_value("half"), 
+		("format", po::value<std::string>()->default_value("half"),
 		  "Choose the desired output file format -- one of 'half' (OpenEXR, 16 bit HDR / half precision), "
 		  "'single' (OpenEXR, 32 bit / single precision), 'jpeg' (libjpeg, 8 bit LDR for convenience)\n")
 		("output", po::value<std::string>()->default_value("output.exr"),
@@ -206,7 +206,7 @@ int main(int argc, char **argv) {
 
 	hidden_options.add_options()
 		("input-files", po::value<std::vector<std::string>>(), "Input files");
-		
+
 	po::options_description all_options;
 	all_options.add(options).add(hidden_options);
 	po::positional_options_description positional;
@@ -222,7 +222,7 @@ int main(int argc, char **argv) {
 
 		if (vm_temp.count("config"))
 			config = vm_temp["config"].as<std::string>();
-	
+
 		if (fexists(config)) {
 			std::ifstream settings(config, std::ifstream::in);
 			po::store(po::parse_config_file(settings, all_options), vm);
@@ -331,7 +331,7 @@ int main(int argc, char **argv) {
 				     << "The test file exptime_showfit.m now compares these two sets of exposure" << endl
 					 << "times, rather than the fit vs EXIF." << endl << endl;
 		}
-		
+
 		/// Step 1: HDR merge
 		es.merge();
 
@@ -418,7 +418,7 @@ int main(int argc, char **argv) {
 		if (flipType != ERotateNoneFlipNone) {
 			uint8_t *t_buf;
 			size_t t_width, t_height;
-			
+
 			if (demosaic) {
 				rotateFlip((uint8_t *) es.image_demosaiced, es.width, es.height,
 					t_buf, t_width, t_height, 3*sizeof(float), flipType);

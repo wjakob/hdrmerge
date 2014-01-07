@@ -53,7 +53,7 @@ void ExposureSeries::initTables(float saturation) {
 	} else {
 		saturation = saturation * (whitepoint-blacklevel) + blacklevel;
 	}
-		
+
 	/* Precompute weight table */
 	for (int i=0; i<0xFFFF; ++i)
 		weight_tbl[i] = compute_weight((uint16_t) i, blacklevel, saturation);
@@ -84,7 +84,7 @@ void ExposureSeries::merge() {
 		for (size_t x=0; x<width; ++x) {
 			float value = 0, total_exposure = 0;
 
-			/* Pass 1: Compute pixel intensity based on a simple 
+			/* Pass 1: Compute pixel intensity based on a simple
 			   Poisson model of arriving photons. Use weighting
 			   to discard over/under-exposed pixels */
 			for (size_t img=0; img<size(); ++img) {

@@ -48,7 +48,7 @@ void rotateFlip(
 	    dst_stride = t_width * bypp;
 
 	dst = new uint8_t[t_width*t_height*bypp];
-	
+
 	uint8_t *dst_row = dst, *src_row = src;
 	if (flip_x)
 		src_row += bypp * (s_width - 1);

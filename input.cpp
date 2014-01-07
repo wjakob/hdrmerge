@@ -181,8 +181,8 @@ void ExposureSeries::check() {
 }
 
 bool fexists(const std::string& name) {
-	  struct stat buffer;   
-	    return (stat (name.c_str(), &buffer) == 0); 
+	  struct stat buffer;
+	    return (stat (name.c_str(), &buffer) == 0);
 }
 
 void ExposureSeries::load() {
