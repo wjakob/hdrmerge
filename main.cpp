@@ -303,7 +303,30 @@ int main(int argc, char **argv) {
 		if (es.size() == 0)
 			throw std::runtime_error("No input found / list of exposures to merge is empty!");
 
-		std::vector<float> exptimes = parse_list<float>(vm, "exptimes", { es.size() });
+		std::vector<float> exptimes;
+		std::map<float, float> exptimes_map;
+		if (vm.count("exptimes")) {
+			std::string value = vm["exptimes"].as<std::string>();
+
+			if (value.find("->") == std::string::npos) {
+				/* Normal list of exposure times, load directly */
+				exptimes = parse_list<float>(vm, "exptimes", { es.size() });
+			} else {
+				/* Map of exposure time replacement values */
+				std::vector<std::string> map_str = parse_list<std::string>(vm, "exptimes", { es.size() }, ",");
+				for (size_t i=0; i<map_str.size(); ++i) {
+					std::vector<std::string> v;
+					boost::algorithm::iter_split(v, map_str[i], boost::algorithm::first_finder("->"));
+					if (v.size() != 2)
+						throw std::runtime_error("Unable to parse the 'exptimes' parameter");
+					try {
+						exptimes_map[boost::lexical_cast<float>(boost::trim_copy(v[0]))] = boost::lexical_cast<float>(boost::trim_copy(v[1]));
+					} catch (const boost::bad_lexical_cast &) {
+						throw std::runtime_error("Unable to parse the 'exptimes' argument!");
+					}
+				}
+			}
+		}
 		es.load();
 
 		/// Precompute relative exposure + weight tables
@@ -316,13 +339,36 @@ int main(int argc, char **argv) {
 			cout << "Overriding exposure times: [";
 
 			for (size_t i=0; i<exptimes.size(); ++i) {
+				cout << es.exposures[i].toString() << "->" << exptimes[i];
 				es.exposures[i].exposure = exptimes[i];
-				cout << es.exposures[i].toString();
 				if (i+1 < exptimes.size())
 					cout << ", ";
 			}
 			cout << "]" << endl;
 		}
+
+		if (!exptimes_map.empty()) {
+			cout << "Overriding exposure times: [";
+			for (size_t i=0; i<es.exposures.size(); ++i) {
+				float from = es.exposures[i].exposure, to = 0;
+				for (std::map<float, float>::const_iterator it = exptimes_map.begin(); it != exptimes_map.end(); ++it) {
+					if (std::abs((it->first - from) / from) < 1e-5f) {
+						if (to != 0)
+							throw std::runtime_error("Internal error!");
+						to = it->second;
+					}
+				}
+				if (to == 0)
+					throw std::runtime_error((boost::format("Specified an exposure time replacement map, but couldn't find an entry for %1%") % from).str());
+
+				cout << es.exposures[i].toString() << "->" << to;
+				if (i+1 < es.exposures.size())
+					cout << ", ";
+				es.exposures[i].exposure = to;
+			}
+			cout << "]" << endl;
+		}
+
 
 		if (vm.count("fitexptimes")) {
 			es.fitExposureTimes();

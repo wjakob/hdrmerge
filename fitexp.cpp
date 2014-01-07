@@ -220,9 +220,8 @@ void ExposureSeries::fitExposureTimes() {
 		 << endl
 		 << "exptimes = ";
 	for (size_t img=0; img<exposures.size(); ++img) {
-		cout << exposures[img].exposure;
-		if (img+1 < exposures.size())
-			cout << ", ";
+		printf("%.20g->%.20g%s", exposuretimes_old[img], exposures[img].exposure,
+			img+1 < exposures.size() ? ", " : "");
 	}
 	cout << endl << endl;
 
