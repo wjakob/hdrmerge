@@ -91,8 +91,16 @@ void ExposureSeries::merge() {
 				value += value_tbl[pxvalue] * weight;
 				total_exposure += exposures[img].exposure * weight;
 			}
-			if (total_exposure > 0)
+			if (total_exposure > 0) {
 				value /= total_exposure;
+			} else {
+				/* No good exposures for this pixel! */
+				for (size_t img=0; img<size(); ++img) {
+					uint16_t pxvalue = exposures[img].image[offset];
+					value += value_tbl[pxvalue];
+					total_exposure += exposures[img].exposure;
+				}
+			}
 
 			float reference = value;
 			value = total_exposure = 0;
@@ -115,6 +123,8 @@ void ExposureSeries::merge() {
 
 			if (total_exposure > 0)
 				value /= total_exposure;
+			else
+				value = reference;
 
 			image_merged[offset++] = value;
 		}
