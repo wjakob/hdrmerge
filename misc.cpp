@@ -1,7 +1,7 @@
 #include "hdrmerge.h"
 #include <boost/algorithm/string.hpp>
 #include <boost/program_options.hpp>
-#include <unistd.h>
+#include <thread>
 
 namespace po = boost::program_options;
 
@@ -97,6 +97,7 @@ std::istream& operator>>(std::istream& in, EColorMode& unit) {
 }
 
 int getProcessorCount() {
-	return sysconf(_SC_NPROCESSORS_CONF);
+	//return sysconf(_SC_NPROCESSORS_CONF);
+	return std::thread::hardware_concurrency();
 }
 
