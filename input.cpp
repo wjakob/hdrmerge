@@ -233,7 +233,7 @@ void ExposureSeries::load() {
 		decoder->decodeMetaData(metadata.get());
 		RawImage raw = decoder->mRaw;
 
-		if (raw->subsampling.x != 1 || raw->subsampling.y != 1)
+		if (raw->metadata.subsampling.x != 1 || raw->metadata.subsampling.y != 1)
 			throw std::runtime_error("Subsampled RAW images are currently not supported!");
 
 		if (raw->getDataType() != TYPE_USHORT16)
