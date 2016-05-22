@@ -4,7 +4,7 @@
 /*
     RawSpeed - RAW file decoder.
 
-    Copyright (C) 2009 Klaus Post
+    Copyright (C) 2009-2014 Klaus Post
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -29,32 +29,41 @@
 namespace RawSpeed {
 
 RawImageData::RawImageData(void):
-    dim(0, 0), isCFA(true),
+    dim(0, 0), isCFA(true), cfa(iPoint2D(0,0)),
     blackLevel(-1), whitePoint(65536),
     dataRefCount(0), data(0), cpp(1), bpp(0),
-    uncropped_dim(0, 0) {
+    uncropped_dim(0, 0), table(NULL) {
   blackLevelSeparate[0] = blackLevelSeparate[1] = blackLevelSeparate[2] = blackLevelSeparate[3] = -1;
   pthread_mutex_init(&mymutex, NULL);
-  subsampling.x = subsampling.y = 1;
-  isoSpeed = 0;
   mBadPixelMap = NULL;
   pthread_mutex_init(&errMutex, NULL);
   pthread_mutex_init(&mBadPixelMutex, NULL);
+  mDitherScale = TRUE;
 }
 
 RawImageData::RawImageData(iPoint2D _dim, uint32 _bpc, uint32 _cpp) :
-    dim(_dim),
+    dim(_dim), isCFA(_cpp==1), cfa(iPoint2D(0,0)),
     blackLevel(-1), whitePoint(65536),
-    dataRefCount(0), data(0), cpp(_cpp), bpp(_bpc),
-    uncropped_dim(0, 0) {
+    dataRefCount(0), data(0), cpp(_cpp), bpp(_bpc * _cpp),
+    uncropped_dim(0, 0), table(NULL) {
   blackLevelSeparate[0] = blackLevelSeparate[1] = blackLevelSeparate[2] = blackLevelSeparate[3] = -1;
-  subsampling.x = subsampling.y = 1;
-  isoSpeed = 0;
   mBadPixelMap = NULL;
+  mDitherScale = TRUE;
   createData();
   pthread_mutex_init(&mymutex, NULL);
   pthread_mutex_init(&errMutex, NULL);
   pthread_mutex_init(&mBadPixelMutex, NULL);
+}
+
+ImageMetaData::ImageMetaData(void) {
+  subsampling.x = subsampling.y = 1;
+  isoSpeed = 0;
+  pixelAspectRatio = 1;
+  fujiRotationPos = 0;
+  wbCoeffs[0] = NAN;
+  wbCoeffs[1] = NAN;
+  wbCoeffs[2] = NAN;
+  wbCoeffs[3] = NAN;
 }
 
 RawImageData::~RawImageData(void) {
@@ -65,6 +74,9 @@ RawImageData::~RawImageData(void) {
   pthread_mutex_destroy(&mBadPixelMutex);
   for (uint32 i = 0 ; i < errors.size(); i++) {
     free((void*)errors[i]);
+  }
+  if (table != NULL) {
+    delete table;
   }
   errors.clear();
   destroyData();
@@ -151,11 +163,11 @@ iPoint2D RawImageData::getCropOffset()
 
 void RawImageData::subFrame(iRectangle2D crop) {
   if (!crop.dim.isThisInside(dim - crop.pos)) {
-    printf("WARNING: RawImageData::subFrame - Attempted to create new subframe larger than original size. Crop skipped.\n");
+    writeLog(DEBUG_PRIO_WARNING, "WARNING: RawImageData::subFrame - Attempted to create new subframe larger than original size. Crop skipped.\n");
     return;
   }
   if (crop.pos.x < 0 || crop.pos.y < 0 || !crop.hasPositiveArea()) {
-    printf("WARNING: RawImageData::subFrame - Negative crop offset. Crop skipped.\n");
+    writeLog(DEBUG_PRIO_WARNING, "WARNING: RawImageData::subFrame - Negative crop offset. Crop skipped.\n");
     return;
   }
 
@@ -203,6 +215,11 @@ RawImage::~RawImage() {
   pthread_mutex_unlock(&p_->mymutex);
 }
 
+void RawImageData::copyErrorsFrom(RawImage other) {
+  for (uint32 i = 0 ; i < other->errors.size(); i++) {
+    setError(other->errors[i]);
+  }
+}
 
 void RawImageData::transferBadPixelsToMap()
 {
@@ -212,7 +229,7 @@ void RawImageData::transferBadPixelsToMap()
   if (!mBadPixelMap)
     createBadPixelMap();
 
-  for (vector<uint32>::iterator i=mBadPixelPositions.begin(); i != mBadPixelPositions.end(); i++) {
+  for (vector<uint32>::iterator i=mBadPixelPositions.begin(); i != mBadPixelPositions.end(); ++i) {
     uint32 pos = *i;
     uint32 pos_x = pos&0xffff;
     uint32 pos_y = pos>>16;
@@ -246,7 +263,7 @@ void RawImageData::fixBadPixels()
 
 #else  // EMULATE_DCRAW_BAD_PIXELS - not recommended, testing purposes only
 
-  for (vector<uint32>::iterator i=mBadPixelPositions.begin(); i != mBadPixelPositions.end(); i++) {
+  for (vector<uint32>::iterator i=mBadPixelPositions.begin(); i != mBadPixelPositions.end(); ++i) {
     uint32 pos = *i;
     uint32 pos_x = pos&0xffff;
     uint32 pos_y = pos>>16;
@@ -273,15 +290,19 @@ void RawImageData::fixBadPixels()
 
 void RawImageData::startWorker(RawImageWorker::RawImageWorkerTask task, bool cropped )
 {
-  int height = cropped ? dim.y : uncropped_dim.y;
+  int height = (cropped) ? dim.y : uncropped_dim.y;
+  if (task & RawImageWorker::FULL_IMAGE) {
+    height = uncropped_dim.y;
+  }
 
-  int threads = getThreadCount(); 
+  int threads = getThreadCount();
   if (threads <= 1) {
     RawImageWorker worker(this, task, 0, height);
     worker.performTask();
     return;
   }
 
+#ifndef NO_PTHREAD
   RawImageWorker **workers = new RawImageWorker*[threads];
   int y_offset = 0;
   int y_per_thread = (height + threads - 1) / threads;
@@ -297,11 +318,17 @@ void RawImageData::startWorker(RawImageWorker::RawImageWorkerTask task, bool cro
     delete workers[i];
   }
   delete[] workers;
+#else
+  ThrowRDE("Unreachable");
+#endif
 }
 
 void RawImageData::fixBadPixelsThread( int start_y, int end_y )
 {
   int gw = (uncropped_dim.x + 15) / 32;
+#ifdef __AFL_COMPILER
+  int bad_count = 0;
+#endif
   for (int y = start_y; y < end_y; y++) {
     uint32* bad_map = (uint32*)&mBadPixelMap[y*mBadPixelMapPitch];
     for (int x = 0 ; x < gw; x++) {
@@ -311,8 +338,13 @@ void RawImageData::fixBadPixelsThread( int start_y, int end_y )
         // Go through each pixel
         for (int i = 0; i < 4; i++) {
           for (int j = 0; j < 8; j++) {
-            if (1 == ((bad[i]>>j) & 1))
+            if (1 == ((bad[i]>>j) & 1)) {
+#ifdef __AFL_COMPILER
+              if (bad_count++ > 100)
+                ThrowRDE("The bad pixels are too damn high!");
+#endif
               fixBadPixel(x*32+i*8+j, y, 0);
+            }
           }
         }
       }
@@ -320,27 +352,103 @@ void RawImageData::fixBadPixelsThread( int start_y, int end_y )
   }
 }
 
-RawImageData* RawImage::operator->() {
-  return p_;
+void RawImageData::blitFrom(RawImage src, iPoint2D srcPos, iPoint2D size, iPoint2D destPos )
+{
+  iRectangle2D src_rect(srcPos, size);
+  iRectangle2D dest_rect(destPos, size);
+  src_rect = src_rect.getOverlap(iRectangle2D(iPoint2D(0,0), src->dim));
+  dest_rect = dest_rect.getOverlap(iRectangle2D(iPoint2D(0,0), dim));
+
+  iPoint2D blitsize = src_rect.dim.getSmallest(dest_rect.dim);
+  if (blitsize.area() <= 0)
+    return;
+
+  // TODO: Move offsets after crop.
+  BitBlt(getData(dest_rect.pos.x, dest_rect.pos.y), pitch, src->getData(src_rect.pos.x, src_rect.pos.y), src->pitch, blitsize.x*bpp, blitsize.y);
 }
 
-RawImageData& RawImage::operator*() {
-  return *p_;
+/* Does not take cfa into consideration */
+void RawImageData::expandBorder(iRectangle2D validData)
+{
+  validData = validData.getOverlap(iRectangle2D(0,0,dim.x, dim.y));
+  if (validData.pos.x > 0) {
+    for (int y = 0; y < dim.y; y++ ) {
+      uchar8* src_pos = getData(validData.pos.x, y);
+      uchar8* dst_pos = getData(validData.pos.x-1, y);
+      for (int x = validData.pos.x; x >= 0; x--) {
+        for (uint32 i = 0; i < bpp; i++) {
+          dst_pos[i] = src_pos[i];
+        }
+        dst_pos -= bpp;
+      }
+    }
+  }
+
+  if (validData.getRight() < dim.x) {
+    int pos = validData.getRight();
+    for (int y = 0; y < dim.y; y++ ) {
+      uchar8* src_pos = getData(pos-1, y);
+      uchar8* dst_pos = getData(pos, y);
+      for (int x = pos; x < dim.x; x++) {
+        for (uint32 i = 0; i < bpp; i++) {
+          dst_pos[i] = src_pos[i];
+        }
+        dst_pos += bpp;
+      }
+    }
+  }
+
+  if (validData.pos.y > 0) {
+    uchar8* src_pos = getData(0, validData.pos.y);
+    for (int y = 0; y < validData.pos.y; y++ ) {
+      uchar8* dst_pos = getData(0, y);
+      memcpy(dst_pos, src_pos, dim.x*bpp);
+    }
+  }
+  if (validData.getBottom() < dim.y) {
+    uchar8* src_pos = getData(0, validData.getBottom()-1);
+    for (int y = validData.getBottom(); y < dim.y; y++ ) {
+      uchar8* dst_pos = getData(0, y);
+      memcpy(dst_pos, src_pos, dim.x*bpp);
+    }
+  }
 }
+
+void RawImageData::clearArea( iRectangle2D area, uchar8 val /*= 0*/ )
+{
+  area = area.getOverlap(iRectangle2D(iPoint2D(0,0), dim));
+
+  if (area.area() <= 0)
+    return;
+
+  for (int y = area.getTop(); y < area.getBottom(); y++)
+    memset(getData(area.getLeft(),y), val, area.getWidth() * bpp);
+}
+
 
 RawImage& RawImage::operator=(const RawImage & p) {
+  if (this == &p)      // Same object?
+    return *this;      // Yes, so skip assignment, and just return *this.
+  pthread_mutex_lock(&p_->mymutex);
+  // Retain the old RawImageData before overwriting it
   RawImageData* const old = p_;
   p_ = p.p_;
+  // Increment use on new data
   ++p_->dataRefCount;
-  if (--old->dataRefCount == 0) delete old;
+  // If the RawImageData previously used by "this" is unused, delete it.
+  if (--old->dataRefCount == 0) {
+  	pthread_mutex_unlock(&(old->mymutex));
+  	delete old;
+  } else {
+  	pthread_mutex_unlock(&(old->mymutex));
+  }
   return *this;
 }
 
 void *RawImageWorkerThread(void *_this) {
   RawImageWorker* me = (RawImageWorker*)_this;
   me->performTask();
-  pthread_exit(NULL);
-  return 0;
+  return NULL;
 }
 
 RawImageWorker::RawImageWorker( RawImageData *_img, RawImageWorkerTask _task, int _start_y, int _end_y )
@@ -349,22 +457,31 @@ RawImageWorker::RawImageWorker( RawImageData *_img, RawImageWorkerTask _task, in
   start_y = _start_y;
   end_y = _end_y;
   task = _task;
+#ifndef NO_PTHREAD
+  pthread_attr_init(&attr);
+  pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+#endif
 }
 
+RawImageWorker::~RawImageWorker() {
+#ifndef NO_PTHREAD
+  pthread_attr_destroy(&attr);  
+#endif
+}
+
+#ifndef NO_PTHREAD
 void RawImageWorker::startThread()
 {
   /* Initialize and set thread detached attribute */
-  pthread_attr_t attr;
-  pthread_attr_init(&attr);
-  pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
   pthread_create(&threadid, &attr, RawImageWorkerThread, this);
 }
 
 void RawImageWorker::waitForThread()
-{ 
+{
   void *status;
   pthread_join(threadid, &status);
 }
+#endif
 
 void RawImageWorker::performTask()
 {
@@ -376,6 +493,9 @@ void RawImageWorker::performTask()
       break;
     case FIX_BAD_PIXELS:
       data->fixBadPixelsThread(start_y, end_y);
+      break;
+    case APPLY_LOOKUP:
+      data->doLookup(start_y, end_y);
       break;
     default:
       _ASSERTE(false);
@@ -389,6 +509,83 @@ void RawImageWorker::performTask()
   }
 }
 
+void RawImageData::sixteenBitLookup() {
+  if (table == NULL) {
+    return;
+  }
+  startWorker(RawImageWorker::APPLY_LOOKUP, true);
+}
+
+void RawImageData::setTable( TableLookUp *t )
+{
+  if (table != NULL) {
+    delete table;
+  }
+  table = t;
+}
+
+void RawImageData::setTable(const ushort16* table, int nfilled, bool dither) {
+  TableLookUp* t = new TableLookUp(1, dither);
+  t->setTable(0, table, nfilled);
+  this->setTable(t);
+}
+
+const int TABLE_SIZE = 65536 * 2;
+
+// Creates n numre of tables.
+TableLookUp::TableLookUp( int _ntables, bool _dither ) : ntables(_ntables), dither(_dither) {
+  tables = NULL;
+  if (ntables < 1) {
+    ThrowRDE("Cannot construct 0 tables");
+  }
+  tables = new ushort16[ntables * TABLE_SIZE];
+  memset(tables, 0, sizeof(ushort16) * ntables * TABLE_SIZE);
+}
+
+TableLookUp::~TableLookUp()
+{
+  if (tables != NULL) {
+    delete[] tables;
+    tables = NULL;
+  }
+}
+
+
+void TableLookUp::setTable(int ntable, const ushort16 *table , int nfilled) {
+  if (ntable > ntables) {
+    ThrowRDE("Table lookup with number greater than number of tables.");
+  }
+  ushort16* t = &tables[ntable* TABLE_SIZE];
+  if (!dither) {
+    for (int i = 0; i < 65536; i++) {
+      t[i] = (i < nfilled) ? table[i] : table[nfilled-1];
+    }
+    return;
+  }
+  for (int i = 0; i < nfilled; i++) {
+    int center = table[i];
+    int lower = i > 0 ? table[i-1] : center;
+    int upper = i < (nfilled-1) ? table[i+1] : center;
+    int delta = upper - lower;
+    t[i*2] = center - ((upper - lower + 2) / 4);
+    t[i*2+1] = delta;
+  }
+
+  for (int i = nfilled; i < 65536; i++) {
+    t[i*2] = table[nfilled-1];
+    t[i*2+1] = 0;
+  }
+  t[0] = t[1];
+  t[TABLE_SIZE - 1] = t[TABLE_SIZE - 2];
+}
+
+
+ushort16* TableLookUp::getTable(int n) {
+  if (n > ntables) {
+    ThrowRDE("Table lookup with number greater than number of tables.");
+  }
+  return &tables[n * TABLE_SIZE];
+}
 
 
 } // namespace RawSpeed

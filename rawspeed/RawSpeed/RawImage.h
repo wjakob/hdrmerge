@@ -7,7 +7,7 @@
 /* 
     RawSpeed - RAW file decoder.
 
-    Copyright (C) 2009 Klaus Post
+    Copyright (C) 2009-2014 Klaus Post
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -34,17 +34,69 @@ typedef enum {TYPE_USHORT16, TYPE_FLOAT32} RawImageType;
 
 class RawImageWorker {
 public:
-  typedef enum {SCALE_VALUES, FIX_BAD_PIXELS} RawImageWorkerTask;
+  typedef enum {
+    SCALE_VALUES = 1, FIX_BAD_PIXELS = 2, APPLY_LOOKUP = 3 | 0x1000, FULL_IMAGE = 0x1000
+  } RawImageWorkerTask;
   RawImageWorker(RawImageData *img, RawImageWorkerTask task, int start_y, int end_y);
+  ~RawImageWorker();
+#ifndef NO_PTHREAD
   void startThread();
   void waitForThread();
+#endif
   void performTask();
 protected:
+#ifndef NO_PTHREAD
   pthread_t threadid;
+  pthread_attr_t attr;
+#endif
   RawImageData* data;
   RawImageWorkerTask task;
   int start_y;
   int end_y;
+};
+
+class TableLookUp {
+public:
+  TableLookUp(int ntables, bool dither);
+  ~TableLookUp();
+  void setTable(int ntable, const ushort16* table, int nfilled);
+  ushort16* getTable(int n);
+  const int ntables;
+  ushort16* tables;
+  const bool dither;
+};
+
+
+class ImageMetaData {
+public:
+  ImageMetaData(void);
+
+  // Aspect ratio of the pixels, usually 1 but some cameras need scaling
+  // <1 means the image needs to be stretched vertically, (0.5 means 2x)
+  // >1 means the image needs to be stretched horizontally (2 mean 2x)
+  double pixelAspectRatio;
+
+  // White balance coefficients of the image
+  float wbCoeffs[4];
+
+  // How many pixels far down the left edge and far up the right edge the image 
+  // corners are when the image is rotated 45 degrees in Fuji rotated sensors.
+  uint32 fujiRotationPos;
+
+  iPoint2D subsampling;
+  string make;
+  string model;
+  string mode;
+
+  string canonical_make;
+  string canonical_model;
+  string canonical_alias;
+  string canonical_id;
+
+  // ISO speed. If known the value is set, otherwise it will be '0'.
+  int isoSpeed;
+
+private:
 };
 
 class RawImageData
@@ -57,17 +109,25 @@ public:
   void setCpp(uint32 val);
   virtual void createData();
   virtual void destroyData();
+  void blitFrom(const RawImage src, iPoint2D srcPos, iPoint2D size, iPoint2D destPos);
   RawSpeed::RawImageType getDataType() const { return dataType; }
   uchar8* getData();
   uchar8* getData(uint32 x, uint32 y);    // Not super fast, but safe. Don't use per pixel.
   uchar8* getDataUncropped(uint32 x, uint32 y);
-  virtual void subFrame( iRectangle2D cropped );
+  virtual void subFrame(iRectangle2D cropped );
+  virtual void clearArea(iRectangle2D area, uchar8 value = 0);
   iPoint2D getUncroppedDim();
   iPoint2D getCropOffset();
   virtual void scaleBlackWhite() = 0;
   virtual void calculateBlackAreas() = 0;
+  virtual void setWithLookUp(ushort16 value, uchar8* dst, uint32* random) = 0;
+  virtual void sixteenBitLookup();
   virtual void transferBadPixelsToMap();
   virtual void fixBadPixels();
+  void copyErrorsFrom(const RawImage other);
+  void expandBorder(iRectangle2D validData);
+  void setTable(const ushort16* table, int nfilled, bool dither);
+  void setTable(TableLookUp *t);
 
   bool isAllocated() {return !!data;}
   void createBadPixelMap();
@@ -79,9 +139,6 @@ public:
   int blackLevelSeparate[4];
   int whitePoint;
   vector<BlackArea> blackAreas;
-  iPoint2D subsampling;
-  string mode;
-  int isoSpeed;
   /* Vector containing silent errors that occurred doing decoding, that may have lead to */
   /* an incomplete image. */
   vector<const char*> errors;
@@ -93,12 +150,15 @@ public:
   pthread_mutex_t mBadPixelMutex;   // Mutex for above, must be used if more than 1 thread is accessing vector
   uchar8 *mBadPixelMap;
   uint32 mBadPixelMapPitch;
+  bool mDitherScale;           // Should upscaling be done with dither to minimize banding?
+  ImageMetaData metadata;
 
 protected:
   RawImageType dataType;
   RawImageData(void);
   RawImageData(iPoint2D dim, uint32 bpp, uint32 cpp=1);
   virtual void scaleValues(int start_y, int end_y) = 0;
+  virtual void doLookup(int start_y, int end_y) = 0;
   virtual void fixBadPixel( uint32 x, uint32 y, int component = 0) = 0;
   void fixBadPixelsThread(int start_y, int end_y);
   void startWorker(RawImageWorker::RawImageWorkerTask task, bool cropped );
@@ -110,17 +170,21 @@ protected:
   pthread_mutex_t mymutex;
   iPoint2D mOffset;
   iPoint2D uncropped_dim;
+  TableLookUp *table;
 };
+
 
 class RawImageDataU16 : public RawImageData
 {
 public:
   virtual void scaleBlackWhite();
   virtual void calculateBlackAreas();
+  virtual void setWithLookUp(ushort16 value, uchar8* dst, uint32* random) final;
 
 protected:
   virtual void scaleValues(int start_y, int end_y);
   virtual void fixBadPixel( uint32 x, uint32 y, int component = 0);
+  virtual void doLookup(int start_y, int end_y);
 
   RawImageDataU16(void);
   RawImageDataU16(iPoint2D dim, uint32 cpp=1);
@@ -132,10 +196,12 @@ class RawImageDataFloat : public RawImageData
 public:
   virtual void scaleBlackWhite();
   virtual void calculateBlackAreas();
+  virtual void setWithLookUp(ushort16 value, uchar8* dst, uint32* random);
 
 protected:
   virtual void scaleValues(int start_y, int end_y);
   virtual void fixBadPixel( uint32 x, uint32 y, int component = 0);
+  virtual void doLookup(int start_y, int end_y);
   RawImageDataFloat(void);
   RawImageDataFloat(iPoint2D dim, uint32 cpp=1);
   friend class RawImage;
@@ -145,13 +211,14 @@ protected:
  public:
    static RawImage create(RawImageType type = TYPE_USHORT16);
    static RawImage create(iPoint2D dim, RawImageType type = TYPE_USHORT16, uint32 componentsPerPixel = 1);
-   RawImageData* operator-> ();
-   RawImageData& operator* ();
+   RawImageData* operator-> (){ return p_; };
+   RawImageData& operator* (){ return *p_; };
    RawImage(RawImageData* p);  // p must not be NULL
   ~RawImage();
    RawImage(const RawImage& p);
    RawImage& operator= (const RawImage& p);
 
+   RawImageData* get() { return p_; }
  private:
    RawImageData* p_;    // p_ is never NULL
  };
@@ -164,7 +231,7 @@ inline RawImage RawImage::create(RawImageType type)  {
     case TYPE_FLOAT32:
       return new RawImageDataFloat();
     default:
-      printf("RawImage::create: Unknown Image type!\n");
+      writeLog(DEBUG_PRIO_ERROR, "RawImage::create: Unknown Image type!\n");
   }
   return NULL; 
 }
@@ -175,9 +242,35 @@ inline RawImage RawImage::create(iPoint2D dim, RawImageType type, uint32 compone
     case TYPE_USHORT16:
       return new RawImageDataU16(dim, componentsPerPixel);
     default:
-      printf("RawImage::create: Unknown Image type!\n");
+      writeLog(DEBUG_PRIO_ERROR, "RawImage::create: Unknown Image type!\n");
   }
   return NULL; 
+}
+
+// setWithLookUp will set a single pixel by using the lookup table if supplied,
+// You must supply the destination where the value should be written, and a pointer to
+// a value that will be used to store a random counter that can be reused between calls.
+// this needs to be inline to speed up tight decompressor loops
+inline void RawImageDataU16::setWithLookUp(ushort16 value, uchar8* dst, uint32* random) {
+  ushort16* dest = (ushort16*)dst;
+  if (table == NULL) {
+    *dest = value;
+    return;
+  }
+  if (table->dither) {
+    uint32* t = (uint32*)table->tables;
+    uint32 lookup = t[value];
+    uint32 base = lookup & 0xffff;
+    uint32 delta = lookup >> 16;
+    uint32 r = *random;
+
+    uint32 pix = base + ((delta * (r&2047) + 1024) >> 12);
+    *random = 15700 *(r & 65535) + (r >> 16);
+    *dest = pix;
+    return;
+  }
+  ushort16* t = (ushort16*)table->tables;
+  *dest = t[value];
 }
 
 } // namespace RawSpeed

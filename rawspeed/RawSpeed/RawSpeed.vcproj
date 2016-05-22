@@ -61,10 +61,11 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="kernel32.lib $(NoInherit) User32.lib pthreadVC2.lib iconv.lib libxml2.lib turbojpeg-static.lib"
+				AdditionalDependencies="kernel32.lib $(NoInherit) User32.lib pthreadVC2.lib turbojpeg-static.lib"
 				LinkIncremental="2"
 				AdditionalLibraryDirectories="..\lib"
 				IgnoreAllDefaultLibraries="false"
+				IgnoreDefaultLibraryNames="libcmt.lib;msvcrtd.lib"
 				GenerateDebugInformation="true"
 				SubSystem="1"
 				TargetMachine="1"
@@ -119,7 +120,7 @@
 			/>
 			<Tool
 				Name="VCCLCompilerTool"
-				Optimization="3"
+				Optimization="2"
 				InlineFunctionExpansion="2"
 				EnableIntrinsicFunctions="true"
 				FavorSizeOrSpeed="1"
@@ -149,7 +150,7 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="kernel32.lib $(NoInherit) User32.lib pthreadVC2.lib iconv.lib libxml2.lib turbojpeg-static.lib"
+				AdditionalDependencies="kernel32.lib $(NoInherit) User32.lib pthreadVC2.lib turbojpeg-static.lib"
 				LinkIncremental="1"
 				AdditionalLibraryDirectories="..\lib"
 				GenerateDebugInformation="true"
@@ -218,8 +219,28 @@
 				</FileConfiguration>
 			</File>
 			<Filter
-				Name="Tiff"
+				Name="Parsers"
 				>
+				<File
+					RelativePath=".\CiffEntry.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\CiffIFD.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\CiffParser.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\CiffParserException.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\RawParser.cpp"
+					>
+				</File>
 				<File
 					RelativePath=".\TiffEntry.cpp"
 					>
@@ -249,7 +270,7 @@
 					>
 				</File>
 				<File
-					RelativePath=".\TiffParserOlympus.cpp"
+					RelativePath=".\X3fParser.cpp"
 					>
 				</File>
 			</Filter>
@@ -258,6 +279,10 @@
 				>
 				<File
 					RelativePath=".\DngDecoderSlices.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\HasselbladDecompressor.cpp"
 					>
 				</File>
 				<File
@@ -289,6 +314,10 @@
 					>
 				</File>
 				<File
+					RelativePath=".\BitPumpMSB16.cpp"
+					>
+				</File>
+				<File
 					RelativePath=".\BitPumpMSB32.cpp"
 					>
 				</File>
@@ -302,6 +331,10 @@
 				</File>
 				<File
 					RelativePath=".\ByteStreamSwap.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\Common.cpp"
 					>
 				</File>
 				<File
@@ -321,13 +354,25 @@
 					>
 				</File>
 				<File
+					RelativePath=".\FileWriter.cpp"
+					>
+				</File>
+				<File
 					RelativePath=".\IOException.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\pugixml.cpp"
 					>
 				</File>
 			</Filter>
 			<Filter
 				Name="Decoders"
 				>
+				<File
+					RelativePath=".\AriDecoder.cpp"
+					>
+				</File>
 				<File
 					RelativePath=".\ARWDecoder.cpp"
 					>
@@ -337,7 +382,39 @@
 					>
 				</File>
 				<File
+					RelativePath=".\CrwDecoder.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\DcrDecoder.cpp"
+					>
+				</File>
+				<File
 					RelativePath=".\DngDecoder.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\ErfDecoder.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\KdcDecoder.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\MefDecoder.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\MosDecoder.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\MrwDecoder.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\NakedDecoder.cpp"
 					>
 				</File>
 				<File
@@ -353,6 +430,10 @@
 					>
 				</File>
 				<File
+					RelativePath=".\RafDecoder.cpp"
+					>
+				</File>
+				<File
 					RelativePath=".\RawDecoder.cpp"
 					>
 				</File>
@@ -361,15 +442,19 @@
 					>
 				</File>
 				<File
-					RelativePath=".\RawParser.cpp"
-					>
-				</File>
-				<File
 					RelativePath=".\Rw2Decoder.cpp"
 					>
 				</File>
 				<File
 					RelativePath=".\SrwDecoder.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\ThreefrDecoder.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\X3fDecoder.cpp"
 					>
 				</File>
 			</Filter>
@@ -424,14 +509,6 @@
 			UniqueIdentifier="{93995380-89BD-4b04-88EB-625FBE52EBFB}"
 			>
 			<File
-				RelativePath=".\FileReader.h"
-				>
-			</File>
-			<File
-				RelativePath=".\RawImage.h"
-				>
-			</File>
-			<File
 				RelativePath=".\stdafx.h"
 				>
 			</File>
@@ -444,6 +521,10 @@
 				</File>
 				<File
 					RelativePath=".\BitPumpMSB.h"
+					>
+				</File>
+				<File
+					RelativePath=".\BitPumpMSB16.h"
 					>
 				</File>
 				<File
@@ -479,6 +560,14 @@
 					>
 				</File>
 				<File
+					RelativePath=".\FileReader.h"
+					>
+				</File>
+				<File
+					RelativePath=".\FileWriter.h"
+					>
+				</File>
+				<File
 					RelativePath=".\IOException.h"
 					>
 				</File>
@@ -492,6 +581,10 @@
 				>
 				<File
 					RelativePath=".\DngDecoderSlices.h"
+					>
+				</File>
+				<File
+					RelativePath=".\HasselbladDecompressor.h"
 					>
 				</File>
 				<File
@@ -510,14 +603,14 @@
 					RelativePath=".\PentaxDecompressor.h"
 					>
 				</File>
-				<File
-					RelativePath=".\rawstudio-plugin-api.h"
-					>
-				</File>
 			</Filter>
 			<Filter
 				Name="Decoders"
 				>
+				<File
+					RelativePath=".\AriDecoder.h"
+					>
+				</File>
 				<File
 					RelativePath=".\ARWDecoder.h"
 					>
@@ -527,7 +620,39 @@
 					>
 				</File>
 				<File
+					RelativePath=".\CrwDecoder.h"
+					>
+				</File>
+				<File
+					RelativePath=".\DcrDecoder.h"
+					>
+				</File>
+				<File
 					RelativePath=".\DngDecoder.h"
+					>
+				</File>
+				<File
+					RelativePath=".\ErfDecoder.h"
+					>
+				</File>
+				<File
+					RelativePath=".\KdcDecoder.h"
+					>
+				</File>
+				<File
+					RelativePath=".\MefDecoder.h"
+					>
+				</File>
+				<File
+					RelativePath=".\MosDecoder.h"
+					>
+				</File>
+				<File
+					RelativePath=".\MrwDecoder.h"
+					>
+				</File>
+				<File
+					RelativePath=".\NakedDecoder.h"
 					>
 				</File>
 				<File
@@ -543,6 +668,10 @@
 					>
 				</File>
 				<File
+					RelativePath=".\RafDecoder.h"
+					>
+				</File>
+				<File
 					RelativePath=".\RawDecoder.h"
 					>
 				</File>
@@ -551,15 +680,19 @@
 					>
 				</File>
 				<File
-					RelativePath=".\RawParser.h"
-					>
-				</File>
-				<File
 					RelativePath=".\Rw2Decoder.h"
 					>
 				</File>
 				<File
 					RelativePath=".\SrwDecoder.h"
+					>
+				</File>
+				<File
+					RelativePath=".\ThreefrDecoder.h"
+					>
+				</File>
+				<File
+					RelativePath=".\X3fDecoder.h"
 					>
 				</File>
 			</Filter>
@@ -592,8 +725,32 @@
 				</File>
 			</Filter>
 			<Filter
-				Name="Tiff"
+				Name="Parsers"
 				>
+				<File
+					RelativePath=".\CiffEntry.h"
+					>
+				</File>
+				<File
+					RelativePath=".\CiffIFD.h"
+					>
+				</File>
+				<File
+					RelativePath=".\CiffParser.h"
+					>
+				</File>
+				<File
+					RelativePath=".\CiffParserException.h"
+					>
+				</File>
+				<File
+					RelativePath=".\CiffTag.h"
+					>
+				</File>
+				<File
+					RelativePath=".\RawParser.h"
+					>
+				</File>
 				<File
 					RelativePath=".\TiffEntry.h"
 					>
@@ -628,6 +785,18 @@
 				</File>
 				<File
 					RelativePath=".\TiffTag.h"
+					>
+				</File>
+				<File
+					RelativePath=".\X3fParser.h"
+					>
+				</File>
+			</Filter>
+			<Filter
+				Name="RawImage"
+				>
+				<File
+					RelativePath=".\RawImage.h"
 					>
 				</File>
 			</Filter>

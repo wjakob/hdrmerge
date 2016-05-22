@@ -4,7 +4,7 @@
 /*
     RawSpeed - RAW file decoder.
 
-    Copyright (C) 2009 Klaus Post
+    Copyright (C) 2009-2014 Klaus Post
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -121,7 +121,7 @@ void RawImageDataU16::scaleBlackWhite() {
   if ((blackAreas.empty() && blackLevelSeparate[0] < 0 && blackLevel < 0) || whitePoint >= 65536) {  // Estimate
     int b = 65536;
     int m = 0;
-    for (int row = skipBorder*cpp;row < (dim.y - skipBorder);row++) {
+    for (int row = skipBorder; row < (dim.y - skipBorder);row++) {
       ushort16 *pixel = (ushort16*)getData(skipBorder, row);
       for (int col = skipBorder ; col < gw ; col++) {
         b = MIN(*pixel, b);
@@ -133,7 +133,7 @@ void RawImageDataU16::scaleBlackWhite() {
       blackLevel = b;
     if (whitePoint >= 65536)
       whitePoint = m;
-    printf("Rawspeed, ISO:%d, Estimated black:%d, Estimated white: %d\n", isoSpeed, blackLevel, whitePoint);
+    writeLog(DEBUG_PRIO_INFO, "ISO:%d, Estimated black:%d, Estimated white: %d\n", metadata.isoSpeed, blackLevel, whitePoint);
   }
 
   /* Skip, if not needed */
@@ -144,8 +144,6 @@ void RawImageDataU16::scaleBlackWhite() {
   if (blackLevelSeparate[0] < 0)
     calculateBlackAreas();
 
-  //printf("ISO:%d, black[0]:%d, white: %d\n", isoSpeed, blackLevelSeparate[0], whitePoint);
-  //printf("black[1]:%d, black[2]:%d, black[3]:%d\n", blackLevelSeparate[1], blackLevelSeparate[2], blackLevelSeparate[3]);
   startWorker(RawImageWorker::SCALE_VALUES, true);
 }
 
@@ -209,11 +207,20 @@ void RawImageDataU16::scaleValues(int start_y, int end_y) {
     sse_full_scale_fp = _mm_set1_epi32(full_scale_fp|(full_scale_fp<<16));
     sse_half_scale_fp = _mm_set1_epi32(half_scale_fp >> 4);
 
-    rand_mul = _mm_set1_epi32(0x4d9f1d32);
+    if (mDitherScale) {
+      rand_mul = _mm_set1_epi32(0x4d9f1d32);
+    } else {
+      rand_mul = _mm_set1_epi32(0);
+    }
     rand_mask = _mm_set1_epi32(0x00ff00ff);  // 8 random bits
 
     for (int y = start_y; y < end_y; y++) {
-      __m128i sserandom = _mm_set_epi32(dim.x*1676+y*18000, dim.x*2342+y*34311, dim.x*4272+y*12123, dim.x*1234+y*23464);
+      __m128i sserandom;
+      if (mDitherScale) {
+          sserandom = _mm_set_epi32(dim.x*1676+y*18000, dim.x*2342+y*34311, dim.x*4272+y*12123, dim.x*1234+y*23464);
+      } else {
+        sserandom = _mm_setzero_si128();
+      }
       __m128i* pixel = (__m128i*) & data[(mOffset.y+y)*pitch];
       __m128i ssescale, ssesub;
       if (((y+mOffset.y)&1) == 0) { 
@@ -286,8 +293,13 @@ void RawImageDataU16::scaleValues(int start_y, int end_y) {
       int *mul_local = &mul[2*(y&1)];
       int *sub_local = &sub[2*(y&1)];
       for (int x = 0 ; x < gw; x++) {
-        v = 18000 *(v & 65535) + (v >> 16);
-        int rand = half_scale_fp - (full_scale_fp * (v&2047));
+        int rand;
+        if (mDitherScale) {
+          v = 18000 *(v & 65535) + (v >> 16);
+          rand = half_scale_fp - (full_scale_fp * (v&2047));
+        } else {
+          rand = 0;
+        }
         pixel[x] = clampbits(((pixel[x] - sub_local[x&1]) * mul_local[x&1] + 8192 + rand) >> 14, 16);
       }
     }
@@ -323,8 +335,13 @@ void RawImageDataU16::scaleValues(int start_y, int end_y) {
     int *mul_local = &mul[2*(y&1)];
     int *sub_local = &sub[2*(y&1)];
     for (int x = 0 ; x < gw; x++) {
-      v = 18000 *(v & 65535) + (v >> 16);
-      int rand = half_scale_fp - (full_scale_fp * (v&2047));
+      int rand;
+      if (mDitherScale) {
+        v = 18000 *(v & 65535) + (v >> 16);
+        rand = half_scale_fp - (full_scale_fp * (v&2047));
+      } else {
+        rand = 0;
+      }
       pixel[x] = clampbits(((pixel[x] - sub_local[x&1]) * mul_local[x&1] + 8192 + rand) >> 14, 16);
     }
   }
@@ -422,6 +439,44 @@ void RawImageDataU16::fixBadPixel( uint32 x, uint32 y, int component )
   if (cpp > 1 && component == 0)
     for (int i = 1; i < (int)cpp; i++)
       fixBadPixel(x,y,i);
+}
+
+// TODO: Could be done with SSE2
+void RawImageDataU16::doLookup( int start_y, int end_y )
+{
+  if (table->ntables == 1) {
+    ushort16* t = table->getTable(0);
+    if (table->dither) {
+      int gw = uncropped_dim.x * cpp;
+      uint32* t = (uint32*)table->getTable(0);
+      for (int y = start_y; y < end_y; y++) {
+        uint32 v = (uncropped_dim.x + y * 13) ^ 0x45694584;
+        ushort16 *pixel = (ushort16*)getDataUncropped(0, y);
+        for (int x = 0 ; x < gw; x++) {
+          ushort16 p = *pixel;
+          uint32 lookup = t[p];
+          uint32 base = lookup & 0xffff;
+          uint32 delta = lookup >> 16;
+          v = 15700 *(v & 65535) + (v >> 16);
+          uint32 pix = base + (((delta * (v&2047) + 1024)) >> 12);
+          *pixel = pix;
+          pixel++;
+        }
+      }
+      return;
+    }
+
+    int gw = uncropped_dim.x * cpp;
+    for (int y = start_y; y < end_y; y++) {
+      ushort16 *pixel = (ushort16*)getDataUncropped(0, y);
+      for (int x = 0 ; x < gw; x++) {
+        *pixel = t[*pixel];
+        pixel ++;
+      }
+    }
+    return;
+  } 
+  ThrowRDE("Table lookup with multiple components not implemented");
 }
 
 } // namespace RawSpeed

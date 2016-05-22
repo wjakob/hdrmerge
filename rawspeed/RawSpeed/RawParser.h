@@ -1,7 +1,7 @@
 /* 
     RawSpeed - RAW file decoder.
 
-    Copyright (C) 2009 Klaus Post
+    Copyright (C) 2009-2014 Klaus Post
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -33,7 +33,8 @@ class RawParser
 public:
   RawParser(FileMap* input);
   virtual ~RawParser();
-  virtual RawDecoder* getDecoder();
+  virtual RawDecoder* getDecoder(CameraMetaData* meta = NULL);
+  void ParseFuji(uint32 offset, TiffIFD *target_ifd);
 protected:
   FileMap *mInput;
 };

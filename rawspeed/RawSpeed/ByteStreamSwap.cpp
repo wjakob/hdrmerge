@@ -12,6 +12,14 @@ ByteStreamSwap::ByteStreamSwap( const ByteStreamSwap* b ) :
 ByteStream(b)
 {}
 
+ByteStreamSwap::ByteStreamSwap( FileMap *f, uint32 offset, uint32 _size ) : 
+ByteStream(f, offset, _size)
+{}
+
+ByteStreamSwap::ByteStreamSwap( FileMap *f, uint32 offset ) : 
+ByteStream(f, offset)
+{}
+
 ByteStreamSwap::~ByteStreamSwap(void)
 {
 }
@@ -28,7 +36,14 @@ ushort16 ByteStreamSwap::getShort() {
 int ByteStreamSwap::getInt() {
   if (off + 4 >= size)
     throw IOException("getInt: Out of buffer read");
-  int r = (int)buffer[off] << 24 | (int)buffer[off] << 16 | (int)buffer[off] << 8 | (int)buffer[off];
+  int r = (int)buffer[off] << 24 | (int)buffer[off+1] << 16 | (int)buffer[off+2] << 8 | (int)buffer[off+3];
+  off+=4;
+  return r;
+}
+uint32 ByteStreamSwap::getUInt() {
+  if (off + 4 >= size)
+    throw IOException("getUInt: Out of buffer read");
+  uint32 r = (uint32)buffer[off] << 24 | (uint32)buffer[off+1] << 16 | (uint32)buffer[off+2] << 8 | (uint32)buffer[off+3];
   off+=4;
   return r;
 }

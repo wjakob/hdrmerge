@@ -1,11 +1,12 @@
 #include "StdAfx.h"
 #include "Cr2Decoder.h"
-#include "TiffParserHeaderless.h"
+#include "ByteStreamSwap.h"
 
 /*
     RawSpeed - RAW file decoder.
 
-    Copyright (C) 2009 Klaus Post
+    Copyright (C) 2009-2014 Klaus Post
+    Copyright (C) 2015 Roman Lebedev
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -28,7 +29,7 @@ namespace RawSpeed {
 
 Cr2Decoder::Cr2Decoder(TiffIFD *rootIFD, FileMap* file) :
     RawDecoder(file), mRootIFD(rootIFD) {
-  decoderVersion = 2;
+  decoderVersion = 6;
 }
 
 Cr2Decoder::~Cr2Decoder(void) {
@@ -38,6 +39,88 @@ Cr2Decoder::~Cr2Decoder(void) {
 }
 
 RawImage Cr2Decoder::decodeRawInternal() {
+  if(hints.find("old_format") != hints.end()) {
+    uint32 off = 0;
+    if (mRootIFD->getEntryRecursive((TiffTag)0x81))
+      off = mRootIFD->getEntryRecursive((TiffTag)0x81)->getInt();
+    else {
+      vector<TiffIFD*> data = mRootIFD->getIFDsWithTag(CFAPATTERN);
+      if (data.empty())
+        ThrowRDE("CR2 Decoder: Couldn't find offset");
+      else {
+        if (data[0]->hasEntry(STRIPOFFSETS))
+          off = data[0]->getEntry(STRIPOFFSETS)->getInt();
+        else
+          ThrowRDE("CR2 Decoder: Couldn't find offset");
+      }
+    }
+
+    ByteStream *b;
+    if (getHostEndianness() == big)
+      b = new ByteStream(mFile, off+41);
+    else
+      b = new ByteStreamSwap(mFile, off+41);
+    uint32 height = b->getShort();
+    uint32 width = b->getShort();
+
+    // Every two lines can be encoded as a single line, probably to try and get
+    // better compression by getting the same RGBG sequence in every line
+    if(hints.find("double_line_ljpeg") != hints.end()) {
+      height *= 2;
+      mRaw->dim = iPoint2D(width*2, height/2);
+    }
+    else {
+      width *= 2;
+      mRaw->dim = iPoint2D(width, height);
+    }
+
+    mRaw->createData();
+    LJpegPlain l(mFile, mRaw);
+    try {
+      l.startDecoder(off, mFile->getSize()-off, 0, 0);
+    } catch (IOException& e) {
+      mRaw->setError(e.what());
+    }
+
+    if(hints.find("double_line_ljpeg") != hints.end()) {
+      // We now have a double width half height image we need to convert to the
+      // normal format
+      iPoint2D final_size(width, height);
+      RawImage procRaw = RawImage::create(final_size, TYPE_USHORT16, 1);
+      procRaw->metadata = mRaw->metadata;
+      procRaw->copyErrorsFrom(mRaw);
+
+      for (uint32 y = 0; y < height; y++) {
+        ushort16 *dst = (ushort16*)procRaw->getData(0,y);
+        ushort16 *src = (ushort16*)mRaw->getData(y%2 == 0 ? 0 : width, y/2);
+        for (uint32 x = 0; x < width; x++)
+          dst[x] = src[x];
+      }
+      mRaw = procRaw;
+    }
+
+    if (mRootIFD->getEntryRecursive((TiffTag)0x123)) {
+      TiffEntry *curve = mRootIFD->getEntryRecursive((TiffTag)0x123);
+      if (curve->type == TIFF_SHORT && curve->count == 4096) {
+        TiffEntry *linearization = mRootIFD->getEntryRecursive((TiffTag)0x123);
+        uint32 len = linearization->count;
+        ushort16 *table = new ushort16[len];
+        linearization->getShortArray(table, len);
+        if (!uncorrectedRawValues) {
+          mRaw->setTable(table, 4096, true);
+          // Apply table
+          mRaw->sixteenBitLookup();
+          // Delete table
+          mRaw->setTable(NULL);
+        } else {
+          // We want uncorrected, but we store the table.
+          mRaw->setTable(table, 4096, false);
+        }
+      }
+    }
+
+    return mRaw;
+  }
 
   vector<TiffIFD*> data = mRootIFD->getIFDsWithTag((TiffTag)0xc5d8);
 
@@ -50,6 +133,7 @@ RawImage Cr2Decoder::decodeRawInternal() {
   mRaw->isCFA = true;
   vector<Cr2Slice> slices;
   int completeH = 0;
+  bool doubleHeight = false;
 
   try {
     TiffEntry *offsets = raw->getEntry(STRIPOFFSETS);
@@ -64,11 +148,14 @@ RawImage Cr2Decoder::decodeRawInternal() {
       l.getSOF(&sof, slice.offset, slice.count);
       slice.w = sof.w * sof.cps;
       slice.h = sof.h;
+      if (sof.cps == 4 && slice.w > slice.h * 4) {
+        doubleHeight = true;
+      }
       if (!slices.empty())
         if (slices[0].w != slice.w)
           ThrowRDE("CR2 Decoder: Slice width does not match.");
 
-      if (mFile->isValid(slice.offset + slice.count)) // Only decode if size is valid
+      if (mFile->isValid(slice.offset, slice.count)) // Only decode if size is valid
         slices.push_back(slice);
       completeH += slice.h;
     }
@@ -76,12 +163,19 @@ RawImage Cr2Decoder::decodeRawInternal() {
     ThrowRDE("CR2 Decoder: Unsupported format.");
   }
 
+  // Override with canon_double_height if set.
+  map<string,string>::iterator msb_hint = hints.find("canon_double_height");
+  if (msb_hint != hints.end())
+    doubleHeight = (0 == (msb_hint->second).compare("true"));
+
   if (slices.empty()) {
     ThrowRDE("CR2 Decoder: No Slices found.");
   }
-
   mRaw->dim = iPoint2D(slices[0].w, completeH);
 
+  // Fix for Canon 6D mRaw, which has flipped width & height for some part of the image
+  // In that case, we swap width and height, since this is the correct dimension
+  bool flipDims = false;
   if (raw->hasEntry((TiffTag)0xc6c5)) {
     ushort16 ss = raw->getEntry((TiffTag)0xc6c5)->getInt();
     // sRaw
@@ -90,17 +184,23 @@ RawImage Cr2Decoder::decodeRawInternal() {
       mRaw->setCpp(3);
       mRaw->isCFA = false;
     }
+    flipDims = mRaw->dim.x < mRaw->dim.y;
+    if (flipDims) {
+      int w = mRaw->dim.x;
+      mRaw->dim.x = mRaw->dim.y;
+      mRaw->dim.y = w;
+    }
   }
 
   mRaw->createData();
 
   vector<int> s_width;
   if (raw->hasEntry(CANONCR2SLICE)) {
-    const ushort16 *ss = raw->getEntry(CANONCR2SLICE)->getShortArray();
-    for (int i = 0; i < ss[0]; i++) {
-      s_width.push_back(ss[1]);
+    TiffEntry *ss = raw->getEntry(CANONCR2SLICE);
+    for (int i = 0; i < ss->getShort(0); i++) {
+      s_width.push_back(ss->getShort(1));
     }
-    s_width.push_back(ss[2]);
+    s_width.push_back(ss->getShort(2));
   } else {
     s_width.push_back(slices[0].w);
   }
@@ -115,6 +215,8 @@ RawImage Cr2Decoder::decodeRawInternal() {
       LJpegPlain l(mFile, mRaw);
       l.addSlices(s_width);
       l.mUseBigtable = true;
+      l.mCanonFlipDim = flipDims;
+      l.mCanonDoubleHeight = doubleHeight;
       l.startDecoder(slice.offset, slice.count, 0, offY);
     } catch (RawDecoderException &e) {
       if (i == 0)
@@ -128,7 +230,7 @@ RawImage Cr2Decoder::decodeRawInternal() {
     offY += slice.w;
   }
 
-  if (mRaw->subsampling.x > 1 || mRaw->subsampling.y > 1)
+  if (mRaw->metadata.subsampling.x > 1 || mRaw->metadata.subsampling.y > 1)
     sRawInterpolate();
 
   return mRaw;
@@ -137,23 +239,22 @@ RawImage Cr2Decoder::decodeRawInternal() {
 void Cr2Decoder::checkSupportInternal(CameraMetaData *meta) {
   vector<TiffIFD*> data = mRootIFD->getIFDsWithTag(MODEL);
   if (data.empty())
-    ThrowRDE("CR2 Support check: Model name found");
+    ThrowRDE("CR2 Support check: Model name not found");
   if (!data[0]->hasEntry(MAKE))
     ThrowRDE("CR2 Support: Make name not found");
   string make = data[0]->getEntry(MAKE)->getString();
   string model = data[0]->getEntry(MODEL)->getString();
+
+  // Check for sRaw mode
   data = mRootIFD->getIFDsWithTag((TiffTag)0xc5d8);
-
-  if (data.empty())
-    ThrowRDE("CR2 Decoder: No image data found");
-
-  TiffIFD* raw = data[0];
-
-  if (raw->hasEntry((TiffTag)0xc6c5)) {
-    ushort16 ss = raw->getEntry((TiffTag)0xc6c5)->getInt();
-    if (ss == 4) {
-      this->checkCameraSupported(meta, make, model, "sRaw1");
-      return;
+  if (!data.empty()) {
+    TiffIFD* raw = data[0];
+    if (raw->hasEntry((TiffTag)0xc6c5)) {
+      ushort16 ss = raw->getEntry((TiffTag)0xc6c5)->getInt();
+      if (ss == 4) {
+        this->checkCameraSupported(meta, make, model, "sRaw1");
+        return;
+      }
     }
   }
   this->checkCameraSupported(meta, make, model, "");
@@ -161,7 +262,7 @@ void Cr2Decoder::checkSupportInternal(CameraMetaData *meta) {
 
 void Cr2Decoder::decodeMetaDataInternal(CameraMetaData *meta) {
   int iso = 0;
-  mRaw->cfa.setCFA(CFA_RED, CFA_GREEN, CFA_GREEN2, CFA_BLUE);
+  mRaw->cfa.setCFA(iPoint2D(2,2), CFA_RED, CFA_GREEN, CFA_GREEN2, CFA_BLUE);
   vector<TiffIFD*> data = mRootIFD->getIFDsWithTag(MODEL);
 
   if (data.empty())
@@ -171,45 +272,93 @@ void Cr2Decoder::decodeMetaDataInternal(CameraMetaData *meta) {
   string model = data[0]->getEntry(MODEL)->getString();
   string mode = "";
 
-  if (mRaw->subsampling.y == 2 && mRaw->subsampling.x == 2)
+  if (mRaw->metadata.subsampling.y == 2 && mRaw->metadata.subsampling.x == 2)
     mode = "sRaw1";
 
-  if (mRaw->subsampling.y == 1 && mRaw->subsampling.x == 2)
+  if (mRaw->metadata.subsampling.y == 1 && mRaw->metadata.subsampling.x == 2)
     mode = "sRaw2";
 
   if (mRootIFD->hasEntryRecursive(ISOSPEEDRATINGS))
     iso = mRootIFD->getEntryRecursive(ISOSPEEDRATINGS)->getInt();
 
-  setMetaData(meta, make, model, mode, iso);
+  // Fetch the white balance
+  try{
+    if (mRootIFD->hasEntryRecursive(CANONCOLORDATA)) {
+      TiffEntry *wb = mRootIFD->getEntryRecursive(CANONCOLORDATA);
+      // this entry is a big table, and different cameras store used WB in
+      // different parts, so find the offset, starting with the most common one
+      int offset = 126;
 
+      // replace it with a hint if it exists
+      if (hints.find("wb_offset") != hints.end()) {
+        stringstream wb_offset(hints.find("wb_offset")->second);
+        wb_offset >> offset;
+      }
+
+      offset /= 2;
+      mRaw->metadata.wbCoeffs[0] = (float) wb->getShort(offset + 0);
+      mRaw->metadata.wbCoeffs[1] = (float) wb->getShort(offset + 1);
+      mRaw->metadata.wbCoeffs[2] = (float) wb->getShort(offset + 3);
+    } else {
+      vector<TiffIFD*> data = mRootIFD->getIFDsWithTag(MODEL);
+
+      if (mRootIFD->hasEntryRecursive(CANONSHOTINFO) &&
+          mRootIFD->hasEntryRecursive(CANONPOWERSHOTG9WB)) {
+        TiffEntry *shot_info = mRootIFD->getEntryRecursive(CANONSHOTINFO);
+        TiffEntry *g9_wb = mRootIFD->getEntryRecursive(CANONPOWERSHOTG9WB);
+
+        ushort16 wb_index = shot_info->getShort(7);
+        int wb_offset = (wb_index < 18) ? "012347800000005896"[wb_index]-'0' : 0;
+        wb_offset = wb_offset*8 + 2;
+
+        mRaw->metadata.wbCoeffs[0] = (float) g9_wb->getInt(wb_offset+1);
+        mRaw->metadata.wbCoeffs[1] = ((float) g9_wb->getInt(wb_offset+0) + (float) g9_wb->getInt(wb_offset+3)) / 2.0f;
+        mRaw->metadata.wbCoeffs[2] = (float) g9_wb->getInt(wb_offset+2);
+      } else if (mRootIFD->hasEntryRecursive((TiffTag) 0xa4)) {
+        // WB for the old 1D and 1DS
+        TiffEntry *wb = mRootIFD->getEntryRecursive((TiffTag) 0xa4);
+        if (wb->count >= 3) {
+          mRaw->metadata.wbCoeffs[0] = wb->getFloat(0);
+          mRaw->metadata.wbCoeffs[1] = wb->getFloat(1);
+          mRaw->metadata.wbCoeffs[2] = wb->getFloat(2);
+        }
+      }
+    }
+  } catch (const std::exception& e) {
+    mRaw->setError(e.what());
+    // We caught an exception reading WB, just ignore it
+  }
+  setMetaData(meta, make, model, mode, iso);
 }
 
 int Cr2Decoder::getHue() {
   if (hints.find("old_sraw_hue") != hints.end())
-    return (mRaw->subsampling.y * mRaw->subsampling.x);
+    return (mRaw->metadata.subsampling.y * mRaw->metadata.subsampling.x);
 
+  if (!mRootIFD->hasEntryRecursive((TiffTag)0x10)) {
+    return 0;
+  }
   uint32 model_id = mRootIFD->getEntryRecursive((TiffTag)0x10)->getInt();
   if (model_id >= 0x80000281 || model_id == 0x80000218 || (hints.find("force_new_sraw_hue") != hints.end()))
-    return ((mRaw->subsampling.y * mRaw->subsampling.x) - 1) >> 1;
+    return ((mRaw->metadata.subsampling.y * mRaw->metadata.subsampling.x) - 1) >> 1;
 
-  return (mRaw->subsampling.y * mRaw->subsampling.x);
+  return (mRaw->metadata.subsampling.y * mRaw->metadata.subsampling.x);
     
 }
 
 // Interpolate and convert sRaw data.
 void Cr2Decoder::sRawInterpolate() {
-  vector<TiffIFD*> data = mRootIFD->getIFDsWithTag((TiffTag)0x4001);
+  vector<TiffIFD*> data = mRootIFD->getIFDsWithTag(CANONCOLORDATA);
   if (data.empty())
     ThrowRDE("CR2 sRaw: Unable to locate WB info.");
 
-  const ushort16 *wb_data = data[0]->getEntry((TiffTag)0x4001)->getShortArray();
-
+  TiffEntry *wb = data[0]->getEntry(CANONCOLORDATA);
   // Offset to sRaw coefficients used to reconstruct uncorrected RGB data.
-  wb_data = &wb_data[4+(126+22)/2];
+  uint32 offset = 78;
 
-  sraw_coeffs[0] = wb_data[0];
-  sraw_coeffs[1] = (wb_data[1] + wb_data[2] + 1) >> 1;
-  sraw_coeffs[2] = wb_data[3];
+  sraw_coeffs[0] = wb->getShort(offset+0);
+  sraw_coeffs[1] = (wb->getShort(offset+1) + wb->getShort(offset+2) + 1) >> 1;
+  sraw_coeffs[2] = wb->getShort(offset+3);
 
   if (hints.find("invert_sraw_wb") != hints.end()) {
     sraw_coeffs[0] = (int)(1024.0f/((float)sraw_coeffs[0]/1024.0f));
@@ -220,14 +369,14 @@ void Cr2Decoder::sRawInterpolate() {
   bool isOldSraw = hints.find("sraw_40d") != hints.end();
   bool isNewSraw = hints.find("sraw_new") != hints.end();
 
-  if (mRaw->subsampling.y == 1 && mRaw->subsampling.x == 2) {
+  if (mRaw->metadata.subsampling.y == 1 && mRaw->metadata.subsampling.x == 2) {
     if (isOldSraw)
       interpolate_422_old(mRaw->dim.x / 2, mRaw->dim.y , 0, mRaw->dim.y);
     else if (isNewSraw)
       interpolate_422_new(mRaw->dim.x / 2, mRaw->dim.y , 0, mRaw->dim.y);
     else
       interpolate_422(mRaw->dim.x / 2, mRaw->dim.y , 0, mRaw->dim.y);
-  } else if (mRaw->subsampling.y == 2 && mRaw->subsampling.x == 2) {
+  } else if (mRaw->metadata.subsampling.y == 2 && mRaw->metadata.subsampling.x == 2) {
     if (isNewSraw)
       interpolate_420_new(mRaw->dim.x / 2, mRaw->dim.y / 2 , 0 , mRaw->dim.y / 2);
     else

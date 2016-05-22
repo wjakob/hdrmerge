@@ -1,11 +1,14 @@
-#ifndef TIFF_PARSER_HEADERLESS_H
-#define TIFF_PARSER_HEADERLESS_H
+#ifndef CRW_DECODER_H
+#define CRW_DECODER_H
 
-#include "TiffParser.h"
+#include "RawDecoder.h"
+#include "LJpegPlain.h"
+#include "CiffIFD.h"
 /* 
     RawSpeed - RAW file decoder.
 
-    Copyright (C) 2009 Klaus Post
+    Copyright (C) 2009-2014 Klaus Post
+    Copyright (C) 2014 Pedro Côrte-Real
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -26,16 +29,23 @@
 
 namespace RawSpeed {
 
-class TiffParserHeaderless :
-  public TiffParser
+class CrwDecoder :
+  public RawDecoder
 {
 public:
-  TiffParserHeaderless(FileMap* input, Endianness _end);
-  virtual ~TiffParserHeaderless(void);
-  void parseData(uint32 firstIfdOffset);
-  virtual void parseData();
+  CrwDecoder(CiffIFD *rootIFD, FileMap* file);
+  virtual RawImage decodeRawInternal();
+  virtual void checkSupportInternal(CameraMetaData *meta);
+  virtual void decodeMetaDataInternal(CameraMetaData *meta);
+  virtual ~CrwDecoder(void);
+protected:
+  CiffIFD *mRootIFD;
+  void makeDecoder(int n, const uchar8 *source);
+  void initHuffTables (uint32 table);
+  uint32 getbithuff (BitPumpJPEG &pump, int nbits, ushort16 *huff);
+  void decodeRaw(bool lowbits, uint32 dec_table, uint32 width, uint32 height);
+  ushort16 *mHuff[2];
 };
 
 } // namespace RawSpeed
-
 #endif

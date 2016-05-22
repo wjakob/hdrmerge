@@ -1,7 +1,7 @@
 /* 
     RawSpeed - RAW file decoder.
 
-    Copyright (C) 2009 Klaus Post
+    Copyright (C) 2009-2014 Klaus Post
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -25,7 +25,7 @@
 
 namespace RawSpeed {
 
-void ThrowTPE(const char* fmt, ...);
+void ThrowTPE(const char* fmt, ...) __attribute__ ((format (printf, 1, 2)));
 
 class TiffParserException : public std::runtime_error
 {

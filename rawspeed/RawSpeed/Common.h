@@ -1,7 +1,7 @@
 /* 
     RawSpeed - RAW file decoder.
 
-    Copyright (C) 2009 Klaus Post
+    Copyright (C) 2009-2014 Klaus Post
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -29,6 +29,11 @@
 #define MIN(a,b) min(a,b)
 #define MAX(a,b) max(a,b)
 typedef unsigned __int64 uint64;
+// MSVC may not have NAN
+#ifndef NAN
+  static const unsigned long __nan[2] = {0xffffffff, 0x7fffffff};
+  #define NAN (*(const float *) __nan)
+#endif
 #else // On linux
 #define _ASSERTE(a) void(a)
 #define _RPT0(a,b) 
@@ -38,8 +43,6 @@ typedef unsigned __int64 uint64;
 #define _RPT4(a,b,c,d,e,f) 
 #define __inline inline
 #define _strdup(a) strdup(a)
-void* _aligned_malloc(size_t bytes, size_t alignment);
-#define _aligned_free(a) do { free(a); } while (0)
 #ifndef MIN
 #define MIN(a, b)  lmin(a,b)
 #endif
@@ -48,6 +51,8 @@ void* _aligned_malloc(size_t bytes, size_t alignment);
 #endif
 typedef unsigned long long uint64;
 #ifndef __MINGW32__
+void* _aligned_malloc(size_t bytes, size_t alignment);
+#define _aligned_free(a) do { free(a); } while (0)
 typedef char* LPCWSTR;
 #endif
 #endif // __unix__
@@ -59,6 +64,44 @@ typedef char* LPCWSTR;
 #define FALSE 0
 #endif
 
+#ifndef UINT32_MAX
+#define UINT32_MAX 0xffffffff
+#endif
+
+#define get2BE(data,pos) ((((ushort16)(data)[pos]) << 8) | \
+                           ((ushort16)(data)[pos+1]))
+
+#define get2LE(data,pos) ((((ushort16)(data)[pos+1]) << 8) | \
+                           ((ushort16)(data)[pos]))
+
+#define get4BE(data,pos) ((((uint32)(data)[pos+0]) << 24) | \
+                          (((uint32)(data)[pos+1]) << 16) | \
+                          (((uint32)(data)[pos+2]) << 8) | \
+                           ((uint32)(data)[pos+3]))
+
+#define get4LE(data,pos) ((((uint32)(data)[pos+3]) << 24) | \
+                          (((uint32)(data)[pos+2]) << 16) | \
+                          (((uint32)(data)[pos+1]) << 8) | \
+                           ((uint32)(data)[pos]))
+
+#define get8LE(data,pos) ((((uint64)(data)[pos+7]) << 56) | \
+                          (((uint64)(data)[pos+6]) << 48) | \
+                          (((uint64)(data)[pos+5]) << 40) | \
+                          (((uint64)(data)[pos+4]) << 32) | \
+                          (((uint64)(data)[pos+3]) << 24) | \
+                          (((uint64)(data)[pos+2]) << 16) | \
+                          (((uint64)(data)[pos+1]) << 8)  | \
+                           ((uint64)(data)[pos]))
+
+#define get8BE(data,pos) ((((uint64)(data)[pos+0]) << 56) | \
+                          (((uint64)(data)[pos+1]) << 48) | \
+                          (((uint64)(data)[pos+2]) << 40) | \
+                          (((uint64)(data)[pos+3]) << 32) | \
+                          (((uint64)(data)[pos+4]) << 24) | \
+                          (((uint64)(data)[pos+5]) << 16) | \
+                          (((uint64)(data)[pos+6]) << 8)  | \
+                           ((uint64)(data)[pos+7]))
+
 int rawspeed_get_number_of_processor_cores();
 
 
@@ -69,11 +112,18 @@ typedef unsigned char uchar8;
 typedef unsigned int uint32;
 typedef signed int int32;
 typedef unsigned short ushort16;
+typedef signed short short16;
 
 typedef enum Endianness {
   big, little, unknown
 } Endianness;
 
+const int DEBUG_PRIO_ERROR = 0x10;
+const int DEBUG_PRIO_WARNING = 0x100;
+const int DEBUG_PRIO_INFO = 0x1000;
+const int DEBUG_PRIO_EXTRA = 0x10000;
+
+void writeLog(int priority, const char *format, ...) __attribute__((format(printf, 2, 3)));
 
 inline void BitBlt(uchar8* dstp, int dst_pitch, const uchar8* srcp, int src_pitch, int row_size, int height) {
   if (height == 1 || (dst_pitch == src_pitch && src_pitch == row_size)) {
@@ -99,12 +149,25 @@ inline int lmax(int p0, int p1) {
 
 inline uint32 getThreadCount()
 {
-#ifdef WIN32
+#ifdef NO_PTHREAD
+  return 1;
+#elif WIN32
   return pthread_num_processors_np();
 #else
   return rawspeed_get_number_of_processor_cores();
 #endif
 }
+
+#ifdef NO_PTHREAD
+typedef void* pthread_mutex_t;
+#define pthread_mutex_init(A, B)
+#define pthread_mutex_destroy(A)
+#define pthread_mutex_lock(A)
+#define pthread_mutex_unlock(A)
+#endif
+
+typedef int __attribute__((aligned(1))) align1_int;
+typedef unsigned int __attribute__((aligned(1))) align1_uint;
 
 inline Endianness getHostEndianness() {
 #if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
@@ -137,6 +200,10 @@ inline Endianness getHostEndianness() {
 #include <intrin.h>
 #define LE_PLATFORM_HAS_BSWAP
 #define PLATFORM_BSWAP32(A) _byteswap_ulong(A)
+// See http://tinyurl.com/hqfuznc
+#if _MSC_VER >= 1900 
+extern "C" { FILE __iob_func[3] = { *stdin,*stdout,*stderr }; }
+#endif
 #endif
 
 inline uint32 clampbits(int x, uint32 n) { 
@@ -186,6 +253,7 @@ inline vector<string> split_string(string input, char c = ' ') {
 typedef enum {
   BitOrder_Plain,  /* Memory order */
   BitOrder_Jpeg,   /* Input is added to stack byte by byte, and output is lifted from top */
+  BitOrder_Jpeg16, /* Same as above, but 16 bits at the time */
   BitOrder_Jpeg32, /* Same as above, but 32 bits at the time */
 } BitOrder;
 

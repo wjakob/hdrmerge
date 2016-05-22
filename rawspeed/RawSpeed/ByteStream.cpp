@@ -3,7 +3,7 @@
 /*
     RawSpeed - RAW file decoder.
 
-    Copyright (C) 2009 Klaus Post
+    Copyright (C) 2009-2014 Klaus Post
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -34,6 +34,19 @@ ByteStream::ByteStream(const ByteStream *b) :
 
 }
 
+ByteStream::ByteStream(FileMap *f, uint32 offset, uint32 _size) :
+    size(_size) {
+  buffer = f->getData(offset, size);
+  off = 0;
+}
+
+ByteStream::ByteStream(FileMap *f, uint32 offset)
+{
+  size = f->getSize() - offset;
+  buffer = f->getData(offset, size);
+  off = 0;
+}
+
 ByteStream::~ByteStream(void) {
 
 }
@@ -45,7 +58,7 @@ uint32 ByteStream::peekByte() {
 void ByteStream::skipBytes(uint32 nbytes) {
   off += nbytes;
   if (off > size)
-    throw IOException("Skipped out of buffer");
+    ThrowIOE("Skipped out of buffer");
 }
 
 uchar8 ByteStream::getByte() {
@@ -56,34 +69,73 @@ uchar8 ByteStream::getByte() {
 }
 
 ushort16 ByteStream::getShort() {
-  if (off + 1 >= size)
-    throw IOException("getShort: Out of buffer read");
+  if (off + 1 > size)
+    ThrowIOE("getShort: Out of buffer read");
   off +=2;
-  return *(ushort16*)&buffer[off-2];
+  return ((ushort16)buffer[off-1] << 8) | (ushort16)buffer[off-2];
+}
+
+uint32 ByteStream::getUInt() {
+  if (off + 4 > size)
+    ThrowIOE("getInt:Out of buffer read");
+  uint32 r = (uint32)buffer[off+3] << 24 | (uint32)buffer[off+2] << 16 | (uint32)buffer[off+1] << 8 | (uint32)buffer[off];
+  off+=4;
+  return r;
 }
 
 int ByteStream::getInt() {
-  if (off + 4 >= size)
-    throw IOException("getInt:Out of buffer read");
+  if (off + 4 > size)
+    ThrowIOE("getInt:Out of buffer read");
+  int r = (int)buffer[off+3] << 24 | (int)buffer[off+2] << 16 | (int)buffer[off+1] << 8 | (int)buffer[off];
   off+=4;
-  return *(int*)&buffer[off-4];
+  return r;
 }
 
 void ByteStream::setAbsoluteOffset(uint32 offset) {
   if (offset >= size)
-    throw IOException("setAbsoluteOffset:Offset set out of buffer");
+    ThrowIOE("setAbsoluteOffset:Offset set out of buffer");
   off = offset;
 }
 
 void ByteStream::skipToMarker() {
   int c = 0;
-  while (!(buffer[off] == 0xFF && buffer[off+1] != 0)) {
+  while (!(buffer[off] == 0xFF && buffer[off+1] != 0 && buffer[off+1] != 0xFF)) {
     off++;
     c++;
     if (off >= size)
-      throw IOException("No marker found inside rest of buffer");
+      ThrowIOE("No marker found inside rest of buffer");
   }
 //  _RPT1(0,"Skipped %u bytes.\n", c);
 }
 
+const char* ByteStream::getString() {
+  int start = off;
+  while (buffer[off] != 0x00) {
+    off++;
+    if (off >= size)
+      ThrowIOE("String not terminated inside rest of buffer");
+  }
+  off++;
+  return (const char*)&buffer[start];
+}
+
+float ByteStream::getFloat()
+{
+  if (off + 4 > size)
+    ThrowIOE("getFloat: Out of buffer read");
+  float temp_f;
+  uchar8 *temp = (uchar8 *)&temp_f;
+  for (int i = 0; i < 4; i++)
+    temp[i] = buffer[off+i];
+  off+=4;
+  return temp_f;
+}
+
+void ByteStream::popOffset()
+{
+ if (offset_stack.empty())
+   ThrowIOE("Pop Offset: Stack empty");
+ off = offset_stack.top();
+ offset_stack.pop();
+}
 } // namespace RawSpeed

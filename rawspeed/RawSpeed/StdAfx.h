@@ -1,7 +1,7 @@
-/* 
+/*
     RawSpeed - RAW file decoder.
 
-    Copyright (C) 2009 Klaus Post
+    Copyright (C) 2009-2014 Klaus Post
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -29,18 +29,33 @@
 #endif
 
 #define WIN32_LEAN_AND_MEAN		// Exclude rarely-used stuff from Windows headers
+
+// there's no <malloc.h> on OS X
+#if !defined(__APPLE__) && !defined(__DragonFly__) &&			\
+    !defined(__FreeBSD__) && !defined(__NetBSD__) &&			\
+    !defined(__OpenBSD__)
+#include <malloc.h>
+#endif
+
 #include <stdio.h>
-#if !defined(__unix__) && !defined(__APPLE__) 
+
+#ifdef __MINGW32__
+#include <stdlib.h>
+#endif
+
+#if !defined(__unix__) && !defined(__APPLE__)
 #include <tchar.h>
 #include <io.h>
-#include <Windows.h>
+#include <windows.h>
+
 #ifndef __MINGW32__
 #include <crtdbg.h>
 #else
 #include <stdexcept>
 #endif
-#include <malloc.h>
-#else // if unix
+
+#else // !defined(__unix__) && !defined(__APPLE__)
+
 #ifdef _XOPEN_SOURCE
 #if (_XOPEN_SOURCE < 600)
 #undef _XOPEN_SOURCE
@@ -57,12 +72,22 @@
 #include <assert.h>
 #endif // __unix__
 #include <math.h>
+#ifndef NO_PTHREAD
+#if _MSC_VER >= 1900 
+// Workaround timespec redefinition: http://tinyurl.com/zcs2ocd
+#define HAVE_STRUCT_TIMESPEC 1
+#endif
 #include "pthread.h"
+#endif
 
 #ifdef FAR  // libjpeg also defines FAR
 #ifdef WIN32_LEAN_AND_MEAN
 #undef FAR
 #endif
+#endif
+
+#ifdef _MSC_VER
+#define __attribute__(p)
 #endif
 
 #ifdef __cplusplus
@@ -80,6 +105,9 @@ extern "C" {
 #include <map>
 #include <list>
 using namespace std;
+
+#include "pugixml.hpp"
+#include <float.h>
 
 //My own
 #include "TiffTag.h"

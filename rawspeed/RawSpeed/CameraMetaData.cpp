@@ -3,7 +3,7 @@
 /*
     RawSpeed - RAW file decoder.
 
-    Copyright (C) 2009 Klaus Post
+    Copyright (C) 2009-2014 Klaus Post
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -28,52 +28,24 @@ CameraMetaData::CameraMetaData() {
 }
 
 CameraMetaData::CameraMetaData(const char *docname) {
-  ctxt = xmlNewParserCtxt();
-  if (ctxt == NULL) {
-    ThrowCME("CameraMetaData:Could not initialize context.");
+  xml_document doc;
+  xml_parse_result result = doc.load_file(docname);
+
+  if (!result) {
+    ThrowCME("CameraMetaData: XML Document could not be parsed successfully. Error was: %s in %s", 
+      result.description(), doc.child("node").attribute("attr").value());
   }
+  xml_node cameras = doc.child("Cameras");
 
-  xmlResetLastError();
-  doc = xmlCtxtReadFile(ctxt, docname, NULL, XML_PARSE_DTDVALID);
+  for (xml_node camera = cameras.child("Camera"); camera; camera = camera.next_sibling("Camera")) {
+    Camera *cam = new Camera(camera);
+    addCamera(cam);
 
-  if (doc == NULL) {
-      ThrowCME("CameraMetaData: XML Document could not be parsed successfully. Error was: %s", ctxt->lastError.message);
-  }
-
-  if (ctxt->valid == 0) {
-    if (ctxt->lastError.code == 0x5e) {
-      printf("CameraMetaData: Unable to locate DTD, attempting to ignore.");
-    } else {
-      ThrowCME("CameraMetaData: XML file does not validate. DTD Error was: %s", ctxt->lastError.message);
+    // Create cameras for aliases.
+    for (uint32 i = 0; i < cam->aliases.size(); i++) {
+      addCamera(new Camera(cam, i));
     }
   }
-
-  xmlNodePtr cur;
-  cur = xmlDocGetRootElement(doc);
-  if (xmlStrcmp(cur->name, (const xmlChar *) "Cameras")) {
-    ThrowCME("CameraMetaData: XML document of the wrong type, root node is not cameras.");
-    return;
-  }
-
-  cur = cur->xmlChildrenNode;
-  while (cur != NULL) {
-    if ((!xmlStrcmp(cur->name, (const xmlChar *)"Camera"))) {
-      Camera *camera = new Camera(doc, cur);
-      addCamera(camera);
-
-      // Create cameras for aliases.
-      for (uint32 i = 0; i < camera->aliases.size(); i++) {
-        addCamera(new Camera(camera, i));
-      }
-    }
-    cur = cur->next;
-  }
-  if (doc)
-    xmlFreeDoc(doc);
-  doc = 0;
-  if (ctxt)
-    xmlFreeParserCtxt(ctxt);
-  ctxt = 0;
 }
 
 CameraMetaData::~CameraMetaData(void) {
@@ -81,12 +53,6 @@ CameraMetaData::~CameraMetaData(void) {
   for (; i != cameras.end(); ++i) {
     delete((*i).second);
   }
-  if (doc)
-    xmlFreeDoc(doc);
-  doc = 0;
-  if (ctxt)
-    xmlFreeParserCtxt(ctxt);
-  ctxt = 0;
 }
 
 Camera* CameraMetaData::getCamera(string make, string model, string mode) {
@@ -103,13 +69,59 @@ bool CameraMetaData::hasCamera(string make, string model, string mode) {
   return TRUE;
 }
 
+Camera* CameraMetaData::getChdkCamera(uint32 filesize) {
+  if (chdkCameras.end() == chdkCameras.find(filesize))
+    return NULL;
+  return chdkCameras[filesize];
+}
+
+bool CameraMetaData::hasChdkCamera(uint32 filesize) {
+  return chdkCameras.end() != chdkCameras.find(filesize);
+}
+
 void CameraMetaData::addCamera( Camera* cam )
 {
   string id = string(cam->make).append(cam->model).append(cam->mode);
-  if (cameras.end() != cameras.find(id))
-    printf("CameraMetaData: Duplicate entry found for camera: %s %s, Skipping!\n", cam->make.c_str(), cam->model.c_str());
-  else
+  if (cameras.end() != cameras.find(id)) {
+    writeLog(DEBUG_PRIO_WARNING, "CameraMetaData: Duplicate entry found for camera: %s %s, Skipping!\n", cam->make.c_str(), cam->model.c_str());
+    delete(cam);
+    return;
+  } else {
     cameras[id] = cam;
+  }
+  if (string::npos != cam->mode.find("chdk")) {
+    if (cam->hints.find("filesize") == cam->hints.end()) {
+      writeLog(DEBUG_PRIO_WARNING, "CameraMetaData: CHDK camera: %s %s, no \"filesize\" hint set!\n", cam->make.c_str(), cam->model.c_str());
+    } else {
+      uint32 size;
+      stringstream fsize(cam->hints.find("filesize")->second);
+      fsize >> size;
+      chdkCameras[size] = cam;
+      // writeLog(DEBUG_PRIO_WARNING, "CHDK camera: %s %s size:%u\n", cam->make.c_str(), cam->model.c_str(), size);
+    }
+  }
+}
+
+void CameraMetaData::disableMake( string make )
+{
+  map<string, Camera*>::iterator i = cameras.begin();
+  for (; i != cameras.end(); ++i) {
+    Camera* cam = (*i).second;
+    if (0 == cam->make.compare(make)) {
+      cam->supported = FALSE;
+    }
+  }
+}
+
+void CameraMetaData::disableCamera( string make, string model )
+{
+  map<string, Camera*>::iterator i = cameras.begin();
+  for (; i != cameras.end(); ++i) {
+    Camera* cam = (*i).second;
+    if (0 == cam->make.compare(make) && 0 == cam->model.compare(model)) {
+      cam->supported = FALSE;
+    }
+  }
 }
 
 } // namespace RawSpeed

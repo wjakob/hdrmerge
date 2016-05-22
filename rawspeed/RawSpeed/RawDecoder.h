@@ -6,6 +6,7 @@
 #include "BitPumpJPEG.h" // Includes bytestream
 #include "RawImage.h"
 #include "BitPumpMSB.h"
+#include "BitPumpMSB16.h"
 #include "BitPumpMSB32.h"
 #include "BitPumpPlain.h"
 #include "CameraMetaData.h"
@@ -14,7 +15,8 @@
 /* 
     RawSpeed - RAW file decoder.
 
-    Copyright (C) 2009 Klaus Post
+    Copyright (C) 2009-2014 Klaus Post
+    Copyright (C) 2014 Pedro Côrte-Real
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -41,12 +43,15 @@ class RawDecoder;
 class RawDecoderThread
 {
   public:
-    RawDecoderThread() {error = 0;};
+    RawDecoderThread() {error = 0; taskNo = -1;};
     uint32 start_y;
     uint32 end_y;
     const char* error;
+#ifndef NO_PTHREAD
     pthread_t threadid;
+#endif
     RawDecoder* parent;
+    uint32 taskNo;
 };
 
 class RawDecoder 
@@ -82,6 +87,10 @@ public:
   /* The delivered class gives information on what part of the image should be decoded. */
   virtual void decodeThreaded(RawDecoderThread* t);
 
+  /* Allows access to the root IFD structure */
+  /* If image isn't TIFF based NULL will be returned */
+  virtual TiffIFD* getRootIFD() {return NULL;}
+
   /* The decoded image - undefined if image has not or could not be decoded. */
   /* Remember this is automatically refcounted, so a reference is retained until this class is destroyed */
   RawImage mRaw; 
@@ -101,6 +110,25 @@ public:
   /* This usually maps out bad pixels, etc */
   bool applyStage1DngOpcodes;
 
+  /* Apply crop - if false uncropped image is delivered */
+  bool applyCrop;
+
+  /* This will skip all corrections, and deliver the raw data */
+  /* This will skip any compression curves or other things that */
+  /* is needed to get the correct values */
+  /* Only enable if you are sure that is what you want */
+  bool uncorrectedRawValues;
+
+  /* Should Fuji images be rotated? */
+  bool fujiRotate;
+
+  /* Vector of objects that will be destroyed alongside the decoder */
+  vector<FileMap*> ownedObjects;
+
+  /* Retrieve the main RAW chunk */
+  /* Returns NULL if unknown */
+  virtual FileMap* getCompressedData() {return NULL;}
+
 protected:
   /* Attempt to decode the image */
   /* A RawDecoderException will be thrown if the image cannot be decoded, */
@@ -115,6 +143,12 @@ protected:
   /* All errors are silently pushed into the "errors" array.*/
   /* If all threads report an error an exception will be thrown*/
   void startThreads();
+
+  /* Helper function for decoders -  */
+  /* The function returns when all tasks are done */
+  /* All errors are silently pushed into the "errors" array.*/
+  /* If all threads report an error an exception will be thrown*/
+  void startTasks(uint32 tasks);
 
   /* Check the camera and mode against the camera database. */
   /* A RawDecoderException will be thrown if the camera isn't supported */
@@ -134,8 +168,41 @@ protected:
   /* order: Order of the bits - see Common.h for possibilities. */
   void readUncompressedRaw(ByteStream &input, iPoint2D& size, iPoint2D& offset, int inputPitch, int bitPerPixel, BitOrder order);
 
+  /* Faster versions for unpacking 8 bit data */
+  void Decode8BitRaw(ByteStream &input, uint32 w, uint32 h);
+
   /* Faster version for unpacking 12 bit LSB data */
   void Decode12BitRaw(ByteStream &input, uint32 w, uint32 h);
+
+  /* Faster version for unpacking 12 bit LSB data with a control byte every 10 pixels */
+  void Decode12BitRawWithControl(ByteStream &input, uint32 w, uint32 h);
+
+  /* Faster version for unpacking 12 bit MSB data with a control byte every 10 pixels */
+  void Decode12BitRawBEWithControl(ByteStream &input, uint32 w, uint32 h);
+
+  /* Faster version for unpacking 12 bit MSB data */
+  void Decode12BitRawBE(ByteStream &input, uint32 w, uint32 h);
+
+  /* Faster version for unpacking 12 bit MSB data with interlaced lines */
+  void Decode12BitRawBEInterlaced(ByteStream &input, uint32 w, uint32 h);
+
+  /* Faster version for reading unpacked 12 bit MSB data */
+  void Decode12BitRawBEunpacked(ByteStream &input, uint32 w, uint32 h);
+
+  /* Faster version for reading unpacked 12 bit MSB data that is left aligned (needs >> 4 shift) */
+  void Decode12BitRawBEunpackedLeftAligned(ByteStream &input, uint32 w, uint32 h);
+  
+  /* Faster version for reading unpacked 14 bit MSB data */
+  void Decode14BitRawBEunpacked(ByteStream &input, uint32 w, uint32 h);
+
+  /* Faster version for reading unpacked 16 bit LSB data */
+  void Decode16BitRawUnpacked(ByteStream &input, uint32 w, uint32 h);
+
+  /* Faster version for reading unpacked 16 bit MSB data */
+  void Decode16BitRawBEunpacked(ByteStream &input, uint32 w, uint32 h);
+
+  /* Faster version for reading unpacked 12 bit LSB data */
+  void Decode12BitRawUnpacked(ByteStream &input, uint32 w, uint32 h);
 
   /* Generic decompressor for uncompressed images */
   /* order: Order of the bits - see Common.h for possibilities. */

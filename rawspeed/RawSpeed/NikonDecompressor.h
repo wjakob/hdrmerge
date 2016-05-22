@@ -2,11 +2,10 @@
 #define NIKON_DECOMPRESSOR_H
 
 #include "LJpegDecompressor.h"
-#include "BitPumpMSB.h"
 /* 
     RawSpeed - RAW file decoder.
 
-    Copyright (C) 2009 Klaus Post
+    Copyright (C) 2009-2014 Klaus Post
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -27,19 +26,20 @@
 
 namespace RawSpeed {
 
+class BitPumpMSB;
+
 class NikonDecompressor :
   public LJpegDecompressor
 {
 public:
   NikonDecompressor(FileMap* file, RawImage img );
 public:
-  virtual ~NikonDecompressor(void);
   void DecompressNikon(ByteStream *meta, uint32 w, uint32 h, uint32 bitsPS, uint32 offset, uint32 size);
+  bool uncorrectedRawValues;
 private:
   void initTable(uint32 huffSelect);
-  int HuffDecodeNikon();
-  ushort16 curve[0x8000];
-  BitPumpMSB *bits;
+  int HuffDecodeNikon(BitPumpMSB& bits);
+  ushort16 curve[65536];
 };
 
 static const uchar8 nikon_tree[][32] = {

@@ -4,7 +4,7 @@
 /*
 RawSpeed - RAW file decoder.
 
-Copyright (C) 2009 Klaus Post
+Copyright (C) 2009-2014 Klaus Post
 
 This library is free software; you can redistribute it and/or
 modify it under the terms of the GNU Lesser General Public
@@ -120,7 +120,7 @@ namespace RawSpeed {
         blackLevel = (int)b;
       if (whitePoint == 65536)
         whitePoint = (int)m;
-      printf("Estimated black:%d, Estimated white: %d\n", blackLevel, whitePoint);
+      writeLog(DEBUG_PRIO_INFO, "Estimated black:%d, Estimated white: %d\n", blackLevel, whitePoint);
     }
 
     /* If filter has not set separate blacklevel, compute or fetch it */
@@ -361,5 +361,21 @@ void RawImageDataFloat::fixBadPixel( uint32 x, uint32 y, int component )
       fixBadPixel(x,y,i);
 
 }
+
+
+void RawImageDataFloat::doLookup( int start_y, int end_y ) {
+  ThrowRDE("Float point lookup tables not implemented");
+}
+
+void RawImageDataFloat::setWithLookUp(ushort16 value, uchar8* dst, uint32* random) {
+  float* dest = (float*)dst;
+  if (table == NULL) {
+    *dest = (float)value * (1.0f/65535);
+    return;
+  }
+
+  ThrowRDE("Float point lookup tables not implemented");
+}
+
 
 } // namespace RawSpeed

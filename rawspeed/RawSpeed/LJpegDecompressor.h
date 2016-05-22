@@ -6,7 +6,7 @@
 /* 
     RawSpeed - RAW file decoder.
 
-    Copyright (C) 2009 Klaus Post
+    Copyright (C) 2009-2014 Klaus Post
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -171,6 +171,8 @@ public:
   virtual void getSOF(SOFInfo* i, uint32 offset, uint32 size);
   bool mDNGCompatible;  // DNG v1.0.x compatibility
   bool mUseBigtable;    // Use only for large images
+  bool mCanonFlipDim;   // Fix Canon 6D mRaw where width/height is flipped
+  bool mCanonDoubleHeight; // Fix Canon double height on 4 components (EOS 5DS R)
   virtual void addSlices(vector<int> slices) {slicesW=slices;};  // CR2 slices.
 protected:
   virtual void parseSOF(SOFInfo* i);

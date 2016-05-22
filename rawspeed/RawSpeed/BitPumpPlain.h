@@ -1,7 +1,7 @@
 /* 
     RawSpeed - RAW file decoder.
 
-    Copyright (C) 2009 Klaus Post
+    Copyright (C) 2009-2014 Klaus Post
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -45,7 +45,7 @@ public:
 	uchar8 getByteSafe();
 	void setAbsoluteOffset(uint32 offset);
   uint32 getOffset() { return off>>3;}
-  __inline void checkPos()  { if (off>size) throw IOException("Out of buffer read");};        // Check if we have a valid position
+  __inline void checkPos()  { if (off>=size) throw IOException("Out of buffer read");};        // Check if we have a valid position
 
   virtual ~BitPumpPlain(void);
 protected:

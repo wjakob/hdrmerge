@@ -1,7 +1,7 @@
 /* 
     RawSpeed - RAW file decoder.
 
-    Copyright (C) 2009 Klaus Post
+    Copyright (C) 2009-2014 Klaus Post
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -36,6 +36,8 @@ class BitPumpMSB
 public:
   BitPumpMSB(ByteStream *s);
   BitPumpMSB(const uchar8* _buffer, uint32 _size );
+  BitPumpMSB(FileMap *f, uint32 offset, uint32 _size );
+  BitPumpMSB(FileMap *f, uint32 offset );
 	uint32 getBitsSafe(uint32 nbits);
 	uint32 getBitSafe();
 	uchar8 getByteSafe();
@@ -44,7 +46,7 @@ public:
   __inline void checkPos()  { if (mStuffed > 8) ThrowIOE("Out of buffer read");};        // Check if we have a valid position
 
   // Fill the buffer with at least 24 bits
- void fill();
+  void __inline fill() {if (mLeft<25) _fill();}
  __inline uint32 peekBitsNoFill( uint32 nbits )
  {
    int shift = mLeft-nbits;
@@ -53,9 +55,8 @@ public:
    return ret & ((1 << nbits) - 1);
  }
 
-
 __inline uint32 getBit() {
-  if (!mLeft) fill();
+  if (!mLeft) _fill();
   mLeft--;
   uint32 _byte = mLeft >> 3;
   return (current_buffer[_byte] >> (mLeft & 0x7)) & 1;
@@ -68,11 +69,12 @@ __inline uint32 getBitsNoFill(uint32 nbits) {
 }
 __inline uint32 getBits(uint32 nbits) {
 	fill();
+  _ASSERTE(nbits <= MIN_GET_BITS);
 	return getBitsNoFill(nbits);
 }
 
 __inline uint32 peekBit() {
-  if (!mLeft) fill();
+  if (!mLeft) _fill();
   return (current_buffer[(mLeft-1) >> 3] >> ((mLeft-1) & 0x7)) & 1;
 }
 __inline uint32 getBitNoFill() {
@@ -103,12 +105,13 @@ __inline uint32 peekByte() {
 } 
 
   __inline void skipBits(unsigned int nbits) {
-    while (nbits) {
+    int skipn = nbits;
+    while (skipn) {
       fill();
       checkPos();
-      int n = MIN(nbits, mLeft);
+      int n = MIN(skipn, mLeft);
       mLeft -= n;
-      nbits -= n;
+      skipn -= n;
     }
   }
 
@@ -125,15 +128,15 @@ __inline uint32 peekByte() {
     return ret & 0xff;
   }
 
-  virtual ~BitPumpMSB(void);
 protected:
+  void _fill();
   void __inline init();
+  uchar8 current_buffer[16];
   const uchar8* buffer;
-  uchar8* current_buffer;
-  const uint32 size;            // This if the end of buffer.
-  uint32 mLeft;
+  uint32 size;            // This if the end of buffer.
+  char mLeft;
   uint32 off;                  // Offset in bytes
-  uint32 mStuffed;
+  int mStuffed;
 private:
 };
 

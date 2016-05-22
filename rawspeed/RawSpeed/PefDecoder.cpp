@@ -3,7 +3,8 @@
 /*
     RawSpeed - RAW file decoder.
 
-    Copyright (C) 2009 Klaus Post
+    Copyright (C) 2009-2014 Klaus Post
+    Copyright (C) 2015 Pedro Côrte-Real
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -37,7 +38,6 @@ PefDecoder::~PefDecoder(void) {
 
 RawImage PefDecoder::decodeRawInternal() {
   vector<TiffIFD*> data = mRootIFD->getIFDsWithTag(STRIPOFFSETS);
-
   if (data.empty())
     ThrowRDE("PEF Decoder: No image data found");
 
@@ -45,7 +45,7 @@ RawImage PefDecoder::decodeRawInternal() {
 
   int compression = raw->getEntry(COMPRESSION)->getInt();
 
-  if (1 == compression) {
+  if (1 == compression || compression == 32773) {
     decodeUncompressed(raw, BitOrder_Jpeg);
     return mRaw;
   }
@@ -62,7 +62,7 @@ RawImage PefDecoder::decodeRawInternal() {
   if (counts->count != offsets->count) {
     ThrowRDE("PEF Decoder: Byte count number does not match strip size: count:%u, strips:%u ", counts->count, offsets->count);
   }
-  if (!mFile->isValid(offsets->getInt() + counts->getInt()))
+  if (!mFile->isValid(offsets->getInt(), counts->getInt()))
     ThrowRDE("PEF Decoder: Truncated file.");
 
   uint32 width = raw->getEntry(IMAGEWIDTH)->getInt();
@@ -95,7 +95,7 @@ void PefDecoder::checkSupportInternal(CameraMetaData *meta) {
 
 void PefDecoder::decodeMetaDataInternal(CameraMetaData *meta) {
   int iso = 0;
-  mRaw->cfa.setCFA(CFA_RED, CFA_GREEN, CFA_GREEN2, CFA_BLUE);
+  mRaw->cfa.setCFA(iPoint2D(2,2), CFA_RED, CFA_GREEN, CFA_GREEN2, CFA_BLUE);
   vector<TiffIFD*> data = mRootIFD->getIFDsWithTag(MODEL);
 
   if (data.empty())
@@ -114,9 +114,20 @@ void PefDecoder::decodeMetaDataInternal(CameraMetaData *meta) {
   // Read black level
   if (mRootIFD->hasEntryRecursive((TiffTag)0x200)) {
     TiffEntry *black = mRootIFD->getEntryRecursive((TiffTag)0x200);
-    const ushort16 *levels = black->getShortArray();
-    for (int i = 0; i < 4; i++)
-      mRaw->blackLevelSeparate[i] = levels[i];
+    if (black->count == 4) {
+      for (int i = 0; i < 4; i++)
+        mRaw->blackLevelSeparate[i] = black->getInt(i);
+    }
+  }
+
+  // Set the whitebalance
+  if (mRootIFD->hasEntryRecursive((TiffTag) 0x0201)) {
+    TiffEntry *wb = mRootIFD->getEntryRecursive((TiffTag) 0x0201);
+    if (wb->count == 4) {
+      mRaw->metadata.wbCoeffs[0] = wb->getInt(0);
+      mRaw->metadata.wbCoeffs[1] = wb->getInt(1);
+      mRaw->metadata.wbCoeffs[2] = wb->getInt(3);
+    }
   }
 }
 

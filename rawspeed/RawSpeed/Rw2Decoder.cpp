@@ -4,7 +4,8 @@
 /*
     RawSpeed - RAW file decoder.
 
-    Copyright (C) 2009 Klaus Post
+    Copyright (C) 2009-2014 Klaus Post
+    Copyright (C) 2014 Pedro Côrte-Real
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -26,7 +27,7 @@ namespace RawSpeed {
 
 Rw2Decoder::Rw2Decoder(TiffIFD *rootIFD, FileMap* file) :
     RawDecoder(file), mRootIFD(rootIFD), input_start(0) {
-      decoderVersion = 1;
+      decoderVersion = 2;
 }
 Rw2Decoder::~Rw2Decoder(void) {
   if (input_start)
@@ -55,9 +56,7 @@ RawImage Rw2Decoder::decodeRawInternal() {
   uint32 width = raw->getEntry((TiffTag)2)->getShort();
 
   if (isOldPanasonic) {
-    ThrowRDE("Cannot decode old-style Panasonic RAW files");
     TiffEntry *offsets = raw->getEntry(STRIPOFFSETS);
-    TiffEntry *counts = raw->getEntry(STRIPBYTECOUNTS);
 
     if (offsets->count != 1) {
       ThrowRDE("RW2 Decoder: Multiple Strips found: %u", offsets->count);
@@ -66,19 +65,23 @@ RawImage Rw2Decoder::decodeRawInternal() {
     if (!mFile->isValid(off))
       ThrowRDE("Panasonic RAW Decoder: Invalid image data offset, cannot decode.");
 
-    int count = counts->getInt();
-    if (count != (int)(width*height*2))
-      ThrowRDE("Panasonic RAW Decoder: Byte count is wrong.");
-
-    if (!mFile->isValid(off+count))
-      ThrowRDE("Panasonic RAW Decoder: Invalid image data offset, cannot decode.");
-      
     mRaw->dim = iPoint2D(width, height);
     mRaw->createData();
-    ByteStream input_start(mFile->getData(off), mFile->getSize() - off);
-    iPoint2D pos(0, 0);
-    readUncompressedRaw(input_start, mRaw->dim,pos, width*2, 16, BitOrder_Plain);
 
+    uint32 size = mFile->getSize() - off;
+    input_start = new ByteStream(mFile, off);
+
+    if (size >= width*height*2) {
+      // It's completely unpacked little-endian
+      Decode12BitRawUnpacked(*input_start, width, height);
+    } else if (size >= width*height*3/2) {
+      // It's a packed format
+      Decode12BitRawWithControl(*input_start, width, height);
+    } else {
+      // It's using the new .RW2 decoding method
+      load_flags = 0;
+      DecodeRw2();
+    }
   } else {
 
     mRaw->dim = iPoint2D(width, height);
@@ -95,9 +98,27 @@ RawImage Rw2Decoder::decodeRawInternal() {
     if (!mFile->isValid(off))
       ThrowRDE("RW2 Decoder: Invalid image data offset, cannot decode.");
 
-    input_start = new ByteStream(mFile->getData(off), mFile->getSize() - off);
+    input_start = new ByteStream(mFile, off);
     DecodeRw2();
   }
+  // Read blacklevels
+  if (raw->hasEntry((TiffTag)0x1c) && raw->hasEntry((TiffTag)0x1d) && raw->hasEntry((TiffTag)0x1e)) {
+    mRaw->blackLevelSeparate[0] = raw->getEntry((TiffTag)0x1c)->getInt() + 15;
+    mRaw->blackLevelSeparate[1] = mRaw->blackLevelSeparate[2] = raw->getEntry((TiffTag)0x1d)->getInt() + 15;
+    mRaw->blackLevelSeparate[3] = raw->getEntry((TiffTag)0x1e)->getInt() + 15;
+  }
+
+  // Read WB levels
+  if (raw->hasEntry((TiffTag)0x0024) && raw->hasEntry((TiffTag)0x0025) && raw->hasEntry((TiffTag)0x0026)) {
+    mRaw->metadata.wbCoeffs[0] = (float) raw->getEntry((TiffTag)0x0024)->getShort();
+    mRaw->metadata.wbCoeffs[1] = (float) raw->getEntry((TiffTag)0x0025)->getShort();
+    mRaw->metadata.wbCoeffs[2] = (float) raw->getEntry((TiffTag)0x0026)->getShort();
+  } else if (raw->hasEntry((TiffTag)0x0011) && raw->hasEntry((TiffTag)0x0012)) {
+    mRaw->metadata.wbCoeffs[0] = (float) raw->getEntry((TiffTag)0x0011)->getShort();
+    mRaw->metadata.wbCoeffs[1] = 256.0f;
+    mRaw->metadata.wbCoeffs[2] = (float) raw->getEntry((TiffTag)0x0012)->getShort();
+  }
+
   return mRaw;
 }
 
@@ -110,10 +131,9 @@ void Rw2Decoder::decodeThreaded(RawDecoderThread * t) {
   int w = mRaw->dim.x / 14;
   uint32 y;
 
-  bool zero_is_bad = false;
-  map<string,string>::iterator zero_hint = hints.find("zero_is_bad");
-  if (zero_hint != hints.end())
-    zero_is_bad = true;
+  bool zero_is_bad = true;
+  if (hints.find("zero_is_not_bad") != hints.end())
+    zero_is_bad = false;
 
   /* 9 + 1/7 bits per pixel */
   int skip = w * 14 * t->start_y * 9;
@@ -191,7 +211,7 @@ void Rw2Decoder::checkSupportInternal(CameraMetaData *meta) {
 }
 
 void Rw2Decoder::decodeMetaDataInternal(CameraMetaData *meta) {
-  mRaw->cfa.setCFA(CFA_BLUE, CFA_GREEN, CFA_GREEN2, CFA_RED);
+  mRaw->cfa.setCFA(iPoint2D(2,2), CFA_BLUE, CFA_GREEN, CFA_GREEN2, CFA_RED);
   vector<TiffIFD*> data = mRootIFD->getIFDsWithTag(MODEL);
 
   if (data.empty())
@@ -209,13 +229,11 @@ void Rw2Decoder::decodeMetaDataInternal(CameraMetaData *meta) {
   if (this->checkCameraSupported(meta, make, model, mode)) {
     setMetaData(meta, make, model, mode, iso);
   } else {
-    mRaw->mode = mode;
+    mRaw->metadata.mode = mode;
     _RPT1(0, "Mode not found in DB: %s", mode.c_str());
     setMetaData(meta, make, model, "", iso);
   }
 }
-
-
 
 std::string Rw2Decoder::guessMode() {
   float ratio = 3.0f / 2.0f;  // Default
@@ -248,7 +266,6 @@ std::string Rw2Decoder::guessMode() {
   _RPT1(0, "Mode guess: '%s'\n", closest_match.c_str());
   return closest_match;
 }
-
 
 PanaBitpump::PanaBitpump(ByteStream* _input) : input(_input), vbits(0) {
 }

@@ -39,8 +39,20 @@ public:
   virtual RawImage decodeRawInternal();
   virtual void decodeMetaDataInternal(CameraMetaData *meta);
   virtual void checkSupportInternal(CameraMetaData *meta);
+  virtual TiffIFD* getRootIFD() {return mRootIFD;}
 private:
+  typedef struct {
+    uchar8 encLen;
+    uchar8 diffLen;
+  } encTableItem;
+
+  void decodeCompressed(TiffIFD* raw);
+  void decodeCompressed2(TiffIFD* raw, int bits);
+  int32 samsungDiff (BitPumpMSB &pump, encTableItem *tbl);
+  void decodeCompressed3(TiffIFD* raw, int bits);
+  string getMode();
   TiffIFD *mRootIFD;
+  ByteStream *b;
 };
 
 } // namespace RawSpeed

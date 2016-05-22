@@ -3,7 +3,7 @@
 /*
     RawSpeed - RAW file decoder.
 
-    Copyright (C) 2009 Klaus Post
+    Copyright (C) 2009-2014 Klaus Post
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -92,10 +92,8 @@ uchar8 BitPumpPlain::getByteSafe() {
 }
 
 void BitPumpPlain::setAbsoluteOffset(unsigned int offset) {
-  if (offset >= size)
-    throw IOException("Offset set out of buffer");
-
   off = offset * 8;
+  checkPos();
 }
 
 

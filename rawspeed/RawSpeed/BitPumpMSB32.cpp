@@ -3,7 +3,7 @@
 /*
     RawSpeed - RAW file decoder.
 
-    Copyright (C) 2009 Klaus Post
+    Copyright (C) 2009-2014 Klaus Post
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -37,17 +37,41 @@ BitPumpMSB32::BitPumpMSB32(const uchar8* _buffer, uint32 _size) :
   init();
 }
 
-__inline void BitPumpMSB32::init() {
-  fill();
+BitPumpMSB32::BitPumpMSB32(FileMap *f, uint32 offset, uint32 _size) :
+    size(_size + sizeof(uint32)), mLeft(0), mCurr(0), off(0) {
+  buffer = f->getDataWrt(offset, size);
+  init();
 }
 
-void BitPumpMSB32::fill()
+BitPumpMSB32::BitPumpMSB32(FileMap *f, uint32 offset) :
+    mLeft(0), mCurr(0), off(0) {
+  size = f->getSize() + sizeof(uint32) - offset;
+  buffer = f->getDataWrt(offset, size);
+  init();
+}
+
+__inline void BitPumpMSB32::init() {
+  mStuffed = 0;
+  _fill();
+}
+
+void BitPumpMSB32::_fill()
 {
   uint32 c, c2, c3, c4;
-
-  if (mLeft >= MIN_GET_BITS)
+  if ((off + 4) > size) {
+    while (off < size) {
+      mCurr <<= 8;
+      c = buffer[off++];
+      mCurr |= c;
+      mLeft += 8;
+    }
+    while (mLeft < MIN_GET_BITS) {
+      mCurr <<= 8;
+      mLeft += 8;
+      mStuffed++;
+    }
     return;
-
+  }
   c = buffer[off++];
   c2 = buffer[off++];
   c3 = buffer[off++];
@@ -62,7 +86,7 @@ uint32 BitPumpMSB32::getBitsSafe(unsigned int nbits) {
     throw IOException("Too many bits requested");
 
   if (mLeft < nbits) {
-    fill();
+    _fill();
     checkPos();
   }
 
@@ -77,7 +101,8 @@ void BitPumpMSB32::setAbsoluteOffset(unsigned int offset) {
   mLeft = 0;
   mCurr = 0;
   off = offset;
-  fill();
+  mStuffed = 0;
+  _fill();
 }
 
 BitPumpMSB32::~BitPumpMSB32(void) {

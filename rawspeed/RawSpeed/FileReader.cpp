@@ -10,7 +10,7 @@
 /*
     RawSpeed - RAW file decoder.
 
-    Copyright (C) 2009 Klaus Post
+    Copyright (C) 2009-2014 Klaus Post
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -61,7 +61,7 @@ FileMap* FileReader::readFile() {
 #else
   FileMap *fileData = new FileMap(size);
 
-  dest = (char *)fileData->getDataWrt(0);
+  dest = (char *)fileData->getDataWrt(0, size);
   bytes_read = fread(dest, 1, size, file);
   fclose(file);
   if (size != bytes_read) {
@@ -86,7 +86,7 @@ FileMap* FileReader::readFile() {
   FileMap *fileData = new FileMap(f_size.LowPart);
 
   DWORD bytes_read;
-  if (! ReadFile(file_h, fileData->getDataWrt(0), fileData->getSize(), &bytes_read, NULL)) {
+  if (! ReadFile(file_h, fileData->getDataWrt(0, fileData->getSize()), fileData->getSize(), &bytes_read, NULL)) {
     CloseHandle(file_h);
     delete fileData;
     throw FileIOException("Could not read file.");

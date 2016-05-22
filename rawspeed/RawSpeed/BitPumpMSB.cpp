@@ -4,7 +4,7 @@
 /*
     RawSpeed - RAW file decoder.
 
-    Copyright (C) 2009 Klaus Post
+    Copyright (C) 2009-2014 Klaus Post
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -38,19 +38,27 @@ BitPumpMSB::BitPumpMSB(const uchar8* _buffer, uint32 _size) :
   init();
 }
 
+BitPumpMSB::BitPumpMSB(FileMap *f, uint32 offset, uint32 _size) :
+    size(_size + sizeof(uint32)), mLeft(0), off(0) {
+  buffer = f->getDataWrt(offset, size);
+  init();
+}
+
+BitPumpMSB::BitPumpMSB(FileMap *f, uint32 offset) :
+    mLeft(0), off(0) {
+  size = f->getSize() + sizeof(uint32) - offset;
+  buffer = f->getDataWrt(offset, size);
+  init();
+}
+
 __inline void BitPumpMSB::init() {
   mStuffed = 0;
-  current_buffer = (uchar8*)_aligned_malloc(16, 16);
-  if (!current_buffer)
-    ThrowRDE("BitPumpMSB::init(): Unable to allocate memory");
   memset(current_buffer,0,16);
   fill();
 }
 
-void BitPumpMSB::fill()
+void BitPumpMSB::_fill()
 {
-  if (mLeft >=24)
-    return;
   // Fill in 96 bits
   int* b = (int*)current_buffer;
   if ((off + 12) > size) {
@@ -72,9 +80,10 @@ void BitPumpMSB::fill()
   }
   b[3] = b[0];
 #if defined(LE_PLATFORM_HAS_BSWAP)
-  b[2] = PLATFORM_BSWAP32(*(int*)&buffer[off]);
-  b[1] = PLATFORM_BSWAP32(*(int*)&buffer[off+4]);
-  b[0] = PLATFORM_BSWAP32(*(int*)&buffer[off+8]);
+  int* buf = (int*)&buffer[off];
+  b[2] = PLATFORM_BSWAP32(buf[0]);
+  b[1] = PLATFORM_BSWAP32(buf[1]);
+  b[0] = PLATFORM_BSWAP32(buf[2]);
   off+=12;
 #else
   b[2] = (buffer[off] << 24) | (buffer[off+1] << 16)  | (buffer[off+2] << 8) | buffer[off+3];
@@ -119,12 +128,6 @@ void BitPumpMSB::setAbsoluteOffset(unsigned int offset) {
   mStuffed = 0;
   off = offset;
   fill();
-}
-
-
-
-BitPumpMSB::~BitPumpMSB(void) {
-	_aligned_free(current_buffer);
 }
 
 } // namespace RawSpeed

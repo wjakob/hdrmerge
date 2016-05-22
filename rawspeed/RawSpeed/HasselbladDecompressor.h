@@ -1,11 +1,14 @@
-#ifndef TIFF_PARSER_OLYMPUS_H
-#define TIFF_PARSER_OLYMPUS_H
+#ifndef HASSELBLAD_DECOMPRESSOR_H
+#define HASSELBLAD_DECOMPRESSOR_H
 
-#include "TiffParser.h"
-/* 
+#include "LJpegDecompressor.h"
+#include "BitPumpMSB.h"
+#include "TiffIFD.h"
+
+/*
     RawSpeed - RAW file decoder.
 
-    Copyright (C) 2009 Klaus Post
+    Copyright (C) 2009-2014 Klaus Post
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -26,13 +29,21 @@
 
 namespace RawSpeed {
 
-class TiffParserOlympus :
-  public TiffParser
+class HasselbladDecompressor :
+  public LJpegDecompressor
 {
 public:
-  TiffParserOlympus(FileMap* input);
-  virtual void parseData();
-  virtual ~TiffParserOlympus(void);
+  HasselbladDecompressor(FileMap* file, RawImage img);
+  virtual ~HasselbladDecompressor(void);
+  int HuffDecodeHasselblad();
+  void decodeHasselblad(TiffIFD *root, uint32 offset, uint32 size);
+  int pixelBaseOffset;
+protected:
+  int HuffGetLength();
+  virtual void parseSOS();
+  void decodeScanHasselblad();
+  inline int getBits(int len);
+  BitPumpMSB32* ph1_bits;  // Phase One has unescaped bits.
 };
 
 } // namespace RawSpeed

@@ -5,7 +5,7 @@
 /*
     RawSpeed - RAW file decoder.
 
-    Copyright (C) 2009 Klaus Post
+    Copyright (C) 2009-2014 Klaus Post
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -91,6 +91,8 @@ LJpegDecompressor::LJpegDecompressor(FileMap* file, RawImage img):
   mDNGCompatible = false;
   slicesW.clear();
   mUseBigtable = false;
+  mCanonFlipDim = false;
+  mCanonDoubleHeight = false;
 }
 
 LJpegDecompressor::~LJpegDecompressor(void) {
@@ -105,15 +107,15 @@ LJpegDecompressor::~LJpegDecompressor(void) {
 }
 
 void LJpegDecompressor::getSOF(SOFInfo* sof, uint32 offset, uint32 size) {
-  if (!mFile->isValid(offset + size - 1))
+  if (!mFile->isValid(offset, size))
     ThrowRDE("LJpegDecompressor::getSOF: Start offset plus size is longer than file. Truncated file.");
   try {
     Endianness host_endian = getHostEndianness();
     // JPEG is big endian
     if (host_endian == big)
-      input = new ByteStream(mFile->getData(offset), size);
+      input = new ByteStream(mFile, offset, size);
     else 
-      input = new ByteStreamSwap(mFile->getData(offset), size);
+      input = new ByteStreamSwap(mFile, offset, size);
 
     if (getNextMarker(false) != M_SOI)
       ThrowRDE("LJpegDecompressor::getSOF: Image did not start with SOI. Probably not an LJPEG");
@@ -135,7 +137,7 @@ void LJpegDecompressor::getSOF(SOFInfo* sof, uint32 offset, uint32 size) {
 }
 
 void LJpegDecompressor::startDecoder(uint32 offset, uint32 size, uint32 offsetX, uint32 offsetY) {
-  if (!mFile->isValid(offset + size - 1))
+  if (!mFile->isValid(offset, size))
     ThrowRDE("LJpegDecompressor::startDecoder: Start offset plus size is longer than file. Truncated file.");
   if ((int)offsetX >= mRaw->dim.x)
     ThrowRDE("LJpegDecompressor::startDecoder: X offset outside of image");
@@ -148,9 +150,9 @@ void LJpegDecompressor::startDecoder(uint32 offset, uint32 size, uint32 offsetX,
     Endianness host_endian = getHostEndianness();
     // JPEG is big endian
     if (host_endian == big)
-      input = new ByteStream(mFile->getData(offset), size);
+      input = new ByteStream(mFile, offset, size);
     else 
-      input = new ByteStreamSwap(mFile->getData(offset), size);
+      input = new ByteStreamSwap(mFile, offset, size);
 
     if (getNextMarker(false) != M_SOI)
       ThrowRDE("LJpegDecompressor::startDecoder: Image did not start with SOI. Probably not an LJPEG");
@@ -214,8 +216,8 @@ void LJpegDecompressor::parseSOF(SOFInfo* sof) {
   if (sof->prec > 16)
     ThrowRDE("LJpegDecompressor: More than 16 bits per channel is not supported.");
 
-  if (sof->cps > 4 || sof->cps < 2)
-    ThrowRDE("LJpegDecompressor: Only from 2 to 4 components are supported.");
+  if (sof->cps > 4 || sof->cps < 1)
+    ThrowRDE("LJpegDecompressor: Only from 1 to 4 components are supported.");
 
   if (headerLength != 8 + sof->cps*3)
     ThrowRDE("LJpegDecompressor: Header size mismatch.");
@@ -470,7 +472,7 @@ void LJpegDecompressor::createBigTable(HuffmanTable *htbl) {
   if (!htbl->bigTable)
     htbl->bigTable = (int*)_aligned_malloc(size * sizeof(int), 16);
   if (!htbl->bigTable)
-	ThrowRDE("Out of memory, failed to allocate %d bytes", size*sizeof(int));
+	ThrowRDE("Out of memory, failed to allocate %zu bytes", size*sizeof(int));
   for (uint32 i = 0; i < size; i++) {
     ushort16 input = i << 2; // Calculate input value
     int code = input >> 8;   // Get 8 bits
@@ -502,9 +504,9 @@ void LJpegDecompressor::createBigTable(HuffmanTable *htbl) {
 
     if (rv == 16) {
       if (mDNGCompatible)
-        htbl->bigTable[i] = (-32768 << 8) | (16 + l);
+        htbl->bigTable[i] = (-(32768 << 8)) | (16 + l);
       else
-        htbl->bigTable[i] = (-32768 << 8) | l;
+        htbl->bigTable[i] = (-(32768 << 8)) | l;
       continue;
     }
 
