@@ -6,32 +6,36 @@ set(CMAKE_BUILD_TYPE Release)
 #set(CMAKE_CXX_COMPILER /usr/local/bin/g++-4.8)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/misc/")
-find_package(LibXml2 REQUIRED)
+
 find_package(JPEG REQUIRED)
 find_package(Threads REQUIRED)
 find_package(OpenEXR REQUIRED)
 find_package(EXIV2 REQUIRED)
 find_package(OpenMP)
 find_package(JPEG)
-find_package(Boost 1.40 COMPONENTS program_options REQUIRED )
+find_package(Boost 1.40 COMPONENTS program_options filesystem REQUIRED )
 
 if (OPENMP_FOUND)
 	set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
 	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
 endif()
 
-include_directories(${LIBXML2_INCLUDE_DIR})
+
 include_directories(${OPENEXR_INCLUDE_PATHS})
 include_directories(${EXIV2_INCLUDE_DIR})
 include_directories(${Boost_INCLUDE_DIR})
 include_directories(${JPEG_INCLUDE_DIR})
+# for pthread.h
+include_directories(${CMAKE_SOURCE_DIR}/rawspeed/include)
 
 # Compile with C++11 features
 set(CMAKE_CXX_FLAGS "-std=c++11 -Wall ${CMAKE_CXX_FLAGS}")
 
-add_subdirectory(rawspeed)
+add_definitions(-D_USE_MATH_DEFINES -D_UNICODE -DUNICODE)
+
+#add_subdirectory(rawspeed)
 add_executable(hdrmerge input.cpp output.cpp main.cpp hdr.cpp fitexp.cpp resample.cpp misc.cpp)
-target_link_libraries(hdrmerge rawspeed ${LIBXML2_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT}
+target_link_libraries(hdrmerge ${CMAKE_THREAD_LIBS_INIT}
 	${JPEG_LIBRARIES} ${OPENEXR_ILMIMF_LIBRARY} ${OPENEXR_HALF_LIBRARY}
 	${OPENEXR_IEX_LIBRARY} ${OPENEXR_ILMBASE_LIBRARY} ${EXIV2_LIBRARY}
 	${Boost_LIBRARIES} ${JPEG_LIBRARIES})
