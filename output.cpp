@@ -124,12 +124,12 @@ void writeJPEG(const std::string &filename, size_t w, size_t h, float *data, int
 	uint8_t **scanlines = new uint8_t*[h];
 
 	#pragma omp parallel for
-	for (size_t i=0; i<h; ++i) {
+	for (int i=0; i<h; ++i) {
 		float *in_ptr = data + w * i * 3;
 		uint8_t *out_ptr = buffer + w * i * 3;
 		scanlines[i] = out_ptr;
 
-		for (size_t j=0; j<3*w; ++j) {
+		for (int j=0; j<3*w; ++j) {
 			float value = *in_ptr++;
 			if (value <= 0.0031308f)
 				value = 12.92f * value;

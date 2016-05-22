@@ -187,7 +187,7 @@ void ExposureSeries::resample(const ReconstructionFilter &rfilter, size_t width_
 		float3 *temp = new float3[width_t * height];
 
 		#pragma omp parallel for
-		for (size_t y=0; y<height; ++y) {
+		for (int y=0; y<height; ++y) {
 			const float3 *srcPtr = image_demosaiced + y * width;
 			const float3 *trgPtr = temp + y * width_t;
 			r.resample((float *) srcPtr, 1, (float *) trgPtr, 1, 3);
@@ -205,7 +205,7 @@ void ExposureSeries::resample(const ReconstructionFilter &rfilter, size_t width_
 		float3 *temp = new float3[width_t * height_t];
 
 		#pragma omp parallel for
-		for (size_t x=0; x<width; ++x) {
+		for (int x=0; x<width; ++x) {
 			const float3 *srcPtr = image_demosaiced + x;
 			const float3 *trgPtr = temp + x;
 

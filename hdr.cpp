@@ -65,10 +65,10 @@ void ExposureSeries::merge() {
 		cout << "Only one exposure was specified -- not doing HDR merging." << endl;
 
 		#pragma omp parallel for
-		for (size_t y=0; y<height; ++y) {
+		for (int y=0; y<height; ++y) {
 			uint16_t *src = exposures[0].image + y * width;
 			float *dst = image_merged + y * width;
-			for (size_t x=0; x<width; ++x)
+			for (int x=0; x<width; ++x)
 				*dst++ = value_tbl[*src++];
 		}
 		exposures[0].release();
@@ -77,15 +77,15 @@ void ExposureSeries::merge() {
 
 	cout << "Merging " << size() << " exposures .." << endl;
 	#pragma omp parallel for
-	for (size_t y=0; y<height; ++y) {
+	for (int y=0; y<height; ++y) {
 		uint32_t offset = y * width;
-		for (size_t x=0; x<width; ++x) {
+		for (int x=0; x<width; ++x) {
 			float value = 0, total_exposure = 0;
 
 			/* Pass 1: Compute pixel intensity based on a simple
 			   Poisson model of arriving photons. Use weighting
 			   to discard over/under-exposed pixels */
-			for (size_t img=0; img<size(); ++img) {
+			for (int img=0; img<size(); ++img) {
 				uint16_t pxvalue = exposures[img].image[offset];
 				float weight = weight_tbl[pxvalue];
 				value += value_tbl[pxvalue] * weight;
@@ -226,7 +226,7 @@ void ExposureSeries::demosaic(float *sensor2xyz) {
 			tiles.push_back(std::make_pair(left, top));
 
 	#pragma omp parallel for /* Parallelize over tiles */
-	for (size_t tile=0; tile<tiles.size(); ++tile) {
+	for (int tile=0; tile<tiles.size(); ++tile) {
 		DemosaicBuffer &buf = buffers[omp_get_thread_num()];
 		size_t left = tiles[tile].first, top = tiles[tile].second;
 
@@ -391,7 +391,7 @@ void ExposureSeries::transform_color(float *sensor2xyz, bool xyz) {
 	}
 
 	#pragma omp parallel for
-	for (size_t y=0; y<height; ++y) {
+	for (int y=0; y<height; ++y) {
 		float3 *ptr = image_demosaiced + y*width;
 		for (size_t x=0; x<width; ++x) {
 			float accum[3] = {0, 0, 0};
@@ -410,7 +410,7 @@ void ExposureSeries::scale(float factor) {
 
 	if (image_merged) {
 		#pragma omp parallel for
-		for (size_t y=0; y<height; ++y) {
+		for (int y=0; y<height; ++y) {
 			float *ptr = image_merged + y*width;
 			for (size_t x=0; x<width; ++x)
 				*ptr++ *= factor;
@@ -419,7 +419,7 @@ void ExposureSeries::scale(float factor) {
 
 	if (image_demosaiced) {
 		#pragma omp parallel for
-		for (size_t y=0; y<height; ++y) {
+		for (int y=0; y<height; ++y) {
 			float3 *ptr = image_demosaiced + y*width;
 			for (size_t x=0; x<width; ++x) {
 				for (int i=0; i<3; ++i)
@@ -559,10 +559,10 @@ void ExposureSeries::vcorr(float a, float b, float c) {
 	cout << "Correcting for vignetting .." << endl;
 
 	#pragma omp parallel for
-	for (size_t y=0; y<height; ++y) {
+	for (int y=0; y<height; ++y) {
 		float3 *ptr = image_demosaiced + y*width;
 		double dy = ((y + 0.5f) - center_y)*size_scale, dy2 = dy*dy;
-		for (size_t x=0; x<width; ++x) {
+		for (int x=0; x<width; ++x) {
 			double dx = ((x + 0.5f) - center_x)*size_scale, dx2 = dx*dx;
 			double dist2 = dx2+dy2, dist4 = dist2*dist2, dist6 = dist4*dist2;
 			float corr = 1.0f / (1.0f + dist2*a + dist4*b + dist6*c);
