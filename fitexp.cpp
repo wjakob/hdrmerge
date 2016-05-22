@@ -102,8 +102,8 @@ struct Patch {
 
 	/// Does a patch overlap another patch?
 	bool overlaps(const Patch &p) const {
-		return std::abs(x-p.x) < patch_size &&
-		       std::abs(y-p.y) < patch_size;
+		return std::abs(int(x-p.x)) < patch_size &&
+		       std::abs(int(y-p.y)) < patch_size;
 	}
 };
 
