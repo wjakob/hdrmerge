@@ -13,7 +13,8 @@ find_package(OpenEXR REQUIRED)
 find_package(EXIV2 REQUIRED)
 find_package(OpenMP)
 find_package(JPEG)
-find_package(Boost 1.40 COMPONENTS program_options filesystem REQUIRED )
+set(Boost_USE_STATIC_LIBS ON)
+find_package(Boost 1.59 COMPONENTS system program_options filesystem REQUIRED )
 
 if (OPENMP_FOUND)
 	set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
@@ -28,14 +29,18 @@ include_directories(${JPEG_INCLUDE_DIR})
 # for pthread.h
 include_directories(${CMAKE_SOURCE_DIR}/rawspeed/include)
 
+include_directories(${CMAKE_SOURCE_DIR}/rawspeed/RawSpeed)
+
 # Compile with C++11 features
 set(CMAKE_CXX_FLAGS "-std=c++11 -Wall ${CMAKE_CXX_FLAGS}")
 
 add_definitions(-D_USE_MATH_DEFINES -D_UNICODE -DUNICODE)
 
-#add_subdirectory(rawspeed)
-add_executable(hdrmerge input.cpp output.cpp main.cpp hdr.cpp fitexp.cpp resample.cpp misc.cpp)
-target_link_libraries(hdrmerge ${CMAKE_THREAD_LIBS_INIT}
-	${JPEG_LIBRARIES} ${OPENEXR_ILMIMF_LIBRARY} ${OPENEXR_HALF_LIBRARY}
-	${OPENEXR_IEX_LIBRARY} ${OPENEXR_ILMBASE_LIBRARY} ${EXIV2_LIBRARY}
-	${Boost_LIBRARIES} ${JPEG_LIBRARIES})
+add_subdirectory(rawspeed)
+
+
+set(PTHREAD_LIBRARY	"${CMAKE_SOURCE_DIR}/rawspeed/lib64/pthreadVC2.lib")
+add_executable(hdrmerge rawspeed input.cpp output.cpp main.cpp hdr.cpp fitexp.cpp resample.cpp misc.cpp ${RAWSPEED_SOURCES})
+target_link_libraries(hdrmerge ${CMAKE_THREAD_LIBS_INIT} 
+	${JPEG_LIBRARIES} ${OPENEXR_LIBRARIES} ${EXIV2_LIBRARY}
+	${Boost_LIBRARIES} ${JPEG_LIBRARIES} ${PTHREAD_LIBRARY} )
