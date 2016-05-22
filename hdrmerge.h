@@ -6,6 +6,9 @@
 #include <map>
 #include <stdexcept>
 #include <cmath>
+#ifdef WIN32
+#include <algorithm>
+#endif
 #include <iostream>
 #include <stdint.h>
 #include <memory>
