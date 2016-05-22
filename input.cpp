@@ -1,10 +1,17 @@
 #include "hdrmerge.h"
 
 #include <mutex>
+#ifdef WIN32
+#include <algorithm>
+#include <io.h>
+#else
 #include <unistd.h>
 #include <libgen.h>
-#include <sys/stat.h>
 #include <limits.h>
+#endif
+
+#include <sys/stat.h>
+#include <boost/filesystem.hpp>
 #include <boost/format.hpp>
 
 #include <exiv2/image.hpp>
@@ -22,6 +29,25 @@ using namespace RawSpeed;
 static std::unique_ptr<CameraMetaData> __metadata;
 static std::mutex __metadata_mutex;
 
+// platform specific function to get exe path
+#ifndef WIN32
+std::string getexepath()
+{
+	char result[PATH_MAX];
+	ssize_t count = readlink("/proc/self/exe", result, PATH_MAX);
+	return std::string(result, (count > 0) ? count : 0);
+}
+#elif WIN32
+std::string getexepath()
+{
+	char result[MAX_PATH];
+	wchar_t wresult[MAX_PATH];
+	DWORD ret = GetModuleFileName(NULL, wresult, MAX_PATH);
+	std::wcstombs(result, wresult, MAX_PATH);
+	return result;
+}
+#endif
+
 /**
  * Find all images in an exposure series and check that some sensible
  * base requirements are satisfied, i.e.
@@ -37,7 +63,7 @@ void ExposureSeries::add(const std::string &fmt) {
 		snprintf(filename, sizeof(filename), fmt.c_str(), exposure);
 		Exposure exp(filename);
 
-		if (access(filename, F_OK) != 0)
+		if (access(filename, 0) != 0)
 			break;
 
 		if (exposure == 1 && strchr(fmt.c_str(), '%') == NULL)
@@ -54,7 +80,7 @@ void ExposureSeries::add(const std::string &fmt) {
 			snprintf(filename, sizeof(filename), fmt.c_str(), exposure);
 			Exposure exp(filename);
 
-			if (access(filename, F_OK) != 0)
+			if (access(filename, 0) != 0)
 				break;
 
 			exposures.push_back(exp);
@@ -188,13 +214,17 @@ bool fexists(const std::string& name) {
 void ExposureSeries::load() {
 	std::unique_ptr<CameraMetaData> metadata;
 
-	char exe_path[PATH_MAX];
-	ssize_t exe_path_size = readlink("/proc/self/exe", exe_path, PATH_MAX);
-	if (exe_path_size == -1)
-		throw std::runtime_error("Unable to read the path of the current binary.");
-	exe_path[exe_path_size] = '\0';
 
-	std::string basedir = dirname(exe_path);
+	//char exe_path[PATH_MAX];
+	//size_t exe_path_size = readlink("/proc/self/exe", exe_path, PATH_MAX);
+
+	std::string exe_path = getexepath();
+	if (exe_path.empty())
+		throw std::runtime_error("Unable to read the path of the current binary.");
+
+	boost::filesystem::path path(exe_path);
+
+	std::string basedir = path.parent_path().string();
 	std::string candidate1 = "rawspeed/data/cameras.xml";
 	std::string candidate2 = basedir + "/" + candidate1;
 	std::string candidate3 = basedir + "/cameras.xml";
@@ -215,7 +245,10 @@ void ExposureSeries::load() {
 
 	#pragma omp parallel for schedule(dynamic, 1)
 	for (int i=0; i<(int) exposures.size(); ++i) {
-		FileReader f((char *) exposures[i].filename.c_str());
+		//FileReader f((char *)exposures[i].filename.c_str());
+		wchar_t wresult[1024];
+		std::mbstowcs(wresult, exposures[i].filename.c_str(), 1024);
+		FileReader f(wresult);
 		std::unique_ptr<FileMap> map(f.readFile());
 
 		RawParser parser(map.get());
