@@ -29,7 +29,6 @@ include_directories(${JPEG_INCLUDE_DIR})
 # for pthread.h
 include_directories(${CMAKE_SOURCE_DIR}/rawspeed/include)
 
-include_directories(${CMAKE_SOURCE_DIR}/rawspeed/RawSpeed)
 
 # Compile with C++11 features
 set(CMAKE_CXX_FLAGS "-std=c++11 -Wall ${CMAKE_CXX_FLAGS}")
@@ -40,7 +39,9 @@ add_subdirectory(rawspeed)
 
 
 set(PTHREAD_LIBRARY	"${CMAKE_SOURCE_DIR}/rawspeed/lib64/pthreadVC2.lib")
-add_executable(hdrmerge rawspeed input.cpp output.cpp main.cpp hdr.cpp fitexp.cpp resample.cpp misc.cpp ${RAWSPEED_SOURCES})
-target_link_libraries(hdrmerge ${CMAKE_THREAD_LIBS_INIT} 
+
+add_executable(hdrmerge input.cpp output.cpp main.cpp hdr.cpp fitexp.cpp resample.cpp misc.cpp ${RAWSPEED_SOURCES})
+
+target_link_libraries(hdrmerge rawspeed ${CMAKE_THREAD_LIBS_INIT} 
 	${JPEG_LIBRARIES} ${OPENEXR_LIBRARIES} ${EXIV2_LIBRARY}
 	${Boost_LIBRARIES} ${JPEG_LIBRARIES} ${PTHREAD_LIBRARY} )
