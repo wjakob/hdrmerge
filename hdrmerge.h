@@ -55,9 +55,9 @@ struct Exposure {
 	std::string toString() const {
 		char buf[10];
 		if (exposure < 1)
-			snprintf(buf, sizeof(buf), "1/%.4g", 1/exposure);
+			_snprintf(buf, sizeof(buf), "1/%.4g", 1/exposure);
 		else
-			snprintf(buf, sizeof(buf), "%.4g", exposure);
+			_snprintf(buf, sizeof(buf), "%.4g", exposure);
 		return buf;
 	}
 };

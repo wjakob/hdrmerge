@@ -60,7 +60,7 @@ void ExposureSeries::add(const std::string &fmt) {
 
 	for (int exposure = 0; ; ++exposure) {
 		char filename[1024];
-		snprintf(filename, sizeof(filename), fmt.c_str(), exposure);
+		_snprintf(filename, sizeof(filename), fmt.c_str(), exposure);
 		Exposure exp(filename);
 
 		if (access(filename, 0) != 0)
@@ -77,7 +77,7 @@ void ExposureSeries::add(const std::string &fmt) {
 		/* Maybe the sequence starts at 1? */
 		for (int exposure = 1; ; ++exposure) {
 			char filename[1024];
-			snprintf(filename, sizeof(filename), fmt.c_str(), exposure);
+			_snprintf(filename, sizeof(filename), fmt.c_str(), exposure);
 			Exposure exp(filename);
 
 			if (access(filename, 0) != 0)
