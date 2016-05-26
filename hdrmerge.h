@@ -1,12 +1,13 @@
 #if !defined(__HDRMERGE_H)
 #define __HDRMERGE_H
 
+#include "platform.h"
 #include <string>
 #include <vector>
 #include <map>
 #include <stdexcept>
 #include <cmath>
-#ifdef WIN32
+#ifdef _MSC_VER
 #include <algorithm>
 #endif
 #include <iostream>
@@ -55,9 +56,9 @@ struct Exposure {
 	std::string toString() const {
 		char buf[10];
 		if (exposure < 1)
-			_snprintf(buf, sizeof(buf), "1/%.4g", 1/exposure);
+			snprintf(buf, sizeof(buf), "1/%.4g", 1/exposure);
 		else
-			_snprintf(buf, sizeof(buf), "%.4g", exposure);
+			snprintf(buf, sizeof(buf), "%.4g", exposure);
 		return buf;
 	}
 };

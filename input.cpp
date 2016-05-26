@@ -1,9 +1,8 @@
 #include "hdrmerge.h"
 
 #include <mutex>
-#ifdef WIN32
+#ifdef _MSC_VER
 #include <algorithm>
-#include <io.h>
 #else
 #include <unistd.h>
 #include <libgen.h>
@@ -17,27 +16,21 @@
 #include <exiv2/image.hpp>
 #include <exiv2/easyaccess.hpp>
 
-#include "rawspeed/RawSpeed/StdAfx.h"
-#include "rawspeed/RawSpeed/FileReader.h"
-#include "rawspeed/RawSpeed/RawDecoder.h"
-#include "rawspeed/RawSpeed/RawParser.h"
-#include "rawspeed/RawSpeed/CameraMetaData.h"
-#include "rawspeed/RawSpeed/ColorFilterArray.h"
-
+#include "rawspeed/RawSpeed/RawSpeed-API.h"
 using namespace RawSpeed;
 
 static std::unique_ptr<CameraMetaData> __metadata;
 static std::mutex __metadata_mutex;
 
 // platform specific function to get exe path
-#ifndef WIN32
+#ifndef _MSC_VER
 std::string getexepath()
 {
 	char result[PATH_MAX];
 	ssize_t count = readlink("/proc/self/exe", result, PATH_MAX);
 	return std::string(result, (count > 0) ? count : 0);
 }
-#elif WIN32
+#elif _MSC_VER
 std::string getexepath()
 {
 	char result[MAX_PATH];
@@ -60,10 +53,10 @@ void ExposureSeries::add(const std::string &fmt) {
 
 	for (int exposure = 0; ; ++exposure) {
 		char filename[1024];
-		_snprintf(filename, sizeof(filename), fmt.c_str(), exposure);
+		snprintf(filename, sizeof(filename), fmt.c_str(), exposure);
 		Exposure exp(filename);
 
-		if (access(filename, 0) != 0)
+		if (access(filename, F_OK) != 0)
 			break;
 
 		if (exposure == 1 && strchr(fmt.c_str(), '%') == NULL)
@@ -77,10 +70,10 @@ void ExposureSeries::add(const std::string &fmt) {
 		/* Maybe the sequence starts at 1? */
 		for (int exposure = 1; ; ++exposure) {
 			char filename[1024];
-			_snprintf(filename, sizeof(filename), fmt.c_str(), exposure);
+			snprintf(filename, sizeof(filename), fmt.c_str(), exposure);
 			Exposure exp(filename);
 
-			if (access(filename, 0) != 0)
+			if (access(filename, F_OK) != 0)
 				break;
 
 			exposures.push_back(exp);
@@ -214,10 +207,6 @@ bool fexists(const std::string& name) {
 void ExposureSeries::load() {
 	std::unique_ptr<CameraMetaData> metadata;
 
-
-	//char exe_path[PATH_MAX];
-	//size_t exe_path_size = readlink("/proc/self/exe", exe_path, PATH_MAX);
-
 	std::string exe_path = getexepath();
 	if (exe_path.empty())
 		throw std::runtime_error("Unable to read the path of the current binary.");
@@ -245,11 +234,14 @@ void ExposureSeries::load() {
 
 	#pragma omp parallel for schedule(dynamic, 1)
 	for (int i=0; i<(int) exposures.size(); ++i) {
-		//FileReader f((char *)exposures[i].filename.c_str());
+		#ifdef _MSC_VER
 		wchar_t wresult[1024];
 		std::mbstowcs(wresult, exposures[i].filename.c_str(), 1024);
 		FileReader f(wresult);
 		std::unique_ptr<FileMap> map(f.readFile());
+		#elif
+		FileReader f((char *)exposures[i].filename.c_str());
+		#endif
 
 		RawParser parser(map.get());
 		std::unique_ptr<RawDecoder> decoder(parser.getDecoder());
