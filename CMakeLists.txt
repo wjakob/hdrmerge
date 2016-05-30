@@ -7,7 +7,7 @@ set(CMAKE_BUILD_TYPE Release)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/misc/")
 
-if("${CMAKE_SYSTEM}" MATCHES "Linux")
+if("${CMAKE_SYSTEM_NAME}" MATCHES "Linux")
 	find_package(LibXml2 REQUIRED)
 endif()
 
