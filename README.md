@@ -5,8 +5,8 @@ of producing RAW output. It does not do any fancy noicy removal or other types
 of postprocessing and instead tries to be simple, understandable and hackable.
 
 ### Compiling
-You will need a recent C++ compiler with support for C++11 and OpenMP. Only g++4.8
-has been tested so far. This program depends on: libxml2 (for RawSpeed), libjpeg,
+You will need a recent C++ compiler with support for C++11 and OpenMP. g++4.8 and
+msvc 12.0 has been tested so far. This program depends on: libxml2 (for Exiv2), libjpeg,
 OpenEXR, libexiv2 and Boost.
 
 Run

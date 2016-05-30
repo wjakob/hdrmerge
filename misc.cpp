@@ -97,7 +97,6 @@ std::istream& operator>>(std::istream& in, EColorMode& unit) {
 }
 
 int getProcessorCount() {
-	//return sysconf(_SC_NPROCESSORS_CONF);
 	return std::thread::hardware_concurrency();
 }
 
