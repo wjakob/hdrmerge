@@ -7,9 +7,7 @@
 #include <map>
 #include <stdexcept>
 #include <cmath>
-#ifdef _MSC_VER
 #include <algorithm>
-#endif
 #include <iostream>
 #include <stdint.h>
 #include <memory>

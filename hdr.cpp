@@ -1,7 +1,13 @@
 #include "hdrmerge.h"
-#include <omp.h>
 #include <string.h>
 #include "Eigen/QR"
+
+#if defined(_OPENMP)
+#  include <omp.h>
+#else
+inline int omp_get_max_threads() { return 1; }
+inline int omp_get_thread_num() { return 0; }
+#endif
 
 float compute_weight(uint16_t value, uint16_t blacklevel, float saturation) {
 	const float alpha = -1.0f / 10.0f;

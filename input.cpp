@@ -235,13 +235,13 @@ void ExposureSeries::load() {
 	#pragma omp parallel for schedule(dynamic, 1)
 	for (int i=0; i<(int) exposures.size(); ++i) {
 		#ifdef _MSC_VER
-		wchar_t wresult[1024];
-		std::mbstowcs(wresult, exposures[i].filename.c_str(), 1024);
-		FileReader f(wresult);
-		std::unique_ptr<FileMap> map(f.readFile());
-		#elif
-		FileReader f((char *)exposures[i].filename.c_str());
+            wchar_t wresult[1024];
+            std::mbstowcs(wresult, exposures[i].filename.c_str(), 1024);
+            FileReader f(wresult);
+		#else
+            FileReader f((char *)exposures[i].filename.c_str());
 		#endif
+		std::unique_ptr<FileMap> map(f.readFile());
 
 		RawParser parser(map.get());
 		std::unique_ptr<RawDecoder> decoder(parser.getDecoder());
