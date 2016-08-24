@@ -1,12 +1,13 @@
 #include "hdrmerge.h"
 
 #include <mutex>
-#ifdef _MSC_VER
 #include <algorithm>
-#else
 #include <unistd.h>
 #include <libgen.h>
 #include <limits.h>
+
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
 #endif
 
 #include <sys/stat.h>
@@ -23,23 +24,30 @@ static std::unique_ptr<CameraMetaData> __metadata;
 static std::mutex __metadata_mutex;
 
 // platform specific function to get exe path
-#ifndef _MSC_VER
-std::string getexepath()
-{
+std::string getexepath() {
 	char result[PATH_MAX];
-	ssize_t count = readlink("/proc/self/exe", result, PATH_MAX);
-	return std::string(result, (count > 0) ? count : 0);
-}
-#elif _MSC_VER
-std::string getexepath()
-{
-	char result[MAX_PATH];
-	wchar_t wresult[MAX_PATH];
-	DWORD ret = GetModuleFileName(NULL, wresult, MAX_PATH);
-	std::wcstombs(result, wresult, MAX_PATH);
+	#if defined(_WIN32)
+		wchar_t wresult[MAX_PATH];
+		DWORD ret = GetModuleFileName(NULL, wresult, MAX_PATH);
+		std::wcstombs(result, wresult, MAX_PATH);
+	#elif defined(__APPLE__)
+		uint32_t len = PATH_MAX;
+		if (_NSGetExecutablePath(result, &len) != 0) {
+			result[0] = '\0';
+		} else {
+			// resolve symlinks, ., .. if possible
+			char *canonicalPath = realpath(result, NULL);
+			if (canonicalPath != NULL) {
+				strncpy(result, canonicalPath, len);
+				free(canonicalPath);
+			}
+		}
+	#else
+		ssize_t count = readlink("/proc/self/exe", result, PATH_MAX);
+		result[count] = '\0';
+	#endif
 	return result;
 }
-#endif
 
 /**
  * Find all images in an exposure series and check that some sensible
