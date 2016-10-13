@@ -128,8 +128,14 @@ void ExposureSeries::check() {
         }
 
         it = exifData.findKey(Exiv2::ExifKey("Exif.Photo.ShutterSpeedValue"));
-        if (it == exifData.end())
-            throw std::runtime_error("\"" + exp.filename + "\": could not extract the exposure time!");
+        if (it != exifData.end()) {
+            exp.exposure = std::pow(2, -it->toFloat());
+        } else {
+            it = exifData.findKey(Exiv2::ExifKey("Exif.Photo.ExposureTime"));
+            if (it == exifData.end())
+                throw std::runtime_error("\"" + exp.filename + "\": could not extract the exposure time!");
+            exp.exposure = it->toFloat();
+        }
 
         exp.exposure = std::pow(2, -it->toFloat());
         //exp.exposure = exposureTime(it->toFloat());
